@@ -1,9 +1,10 @@
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError, transaction
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from cart.models import Cart, CartItem
-from orders.models import Order
+from orders.models import Order, OrderItem
 from products.models import Category, Product
 
 
@@ -66,3 +67,20 @@ class OrderApiTests(APITestCase):
         response = self.client.get(f"/api/orders/{order.pk}/")
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_database_rejects_invalid_order_amounts_and_quantities(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Order.objects.create(user=self.user, total="-1.00")
+
+        order = Order.objects.create(user=self.user, total="0.00")
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                OrderItem.objects.create(
+                    order=order,
+                    product=self.product,
+                    product_name=self.product.name,
+                    unit_price="10.00",
+                    quantity=0,
+                    line_total="0.00",
+                )

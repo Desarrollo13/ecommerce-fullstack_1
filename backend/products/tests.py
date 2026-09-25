@@ -1,3 +1,4 @@
+from django.db import IntegrityError, transaction
 from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -85,3 +86,29 @@ class ProductApiTests(APITestCase):
         self.client.force_authenticate(self.staff)
         response = self.client.post("/api/products/", payload)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    def test_product_creation_rejects_negative_prices(self):
+        self.client.force_authenticate(self.staff)
+        payload = {
+            "name": "Invalid product",
+            "description": "Negative price",
+            "price": "-1.00",
+            "stock": 1,
+            "category": self.active_category.id,
+        }
+
+        response = self.client.post("/api/products/", payload)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("price", response.data)
+
+    def test_database_rejects_negative_product_prices(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Product.objects.create(
+                    name="Invalid product",
+                    description="Negative price",
+                    price="-1.00",
+                    stock=1,
+                    category=self.active_category,
+                )
