@@ -1,3 +1,4 @@
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import status
@@ -16,8 +17,11 @@ from products.models import Product
 
 
 def get_cart(user):
-    cart, _ = Cart.objects.get_or_create(user=user)
-    return cart
+    with transaction.atomic():
+        # Serializes first-cart creation for concurrent requests from one user.
+        get_user_model().objects.select_for_update().get(pk=user.pk)
+        cart, _ = Cart.objects.get_or_create(user=user)
+        return cart
 
 
 class CartView(APIView):
@@ -82,6 +86,12 @@ class CartItemDetailView(APIView):
             )
             product = Product.objects.select_for_update().get(pk=item.product_id)
             quantity = serializer.validated_data["quantity"]
+
+            if not product.is_active:
+                return Response(
+                    {"detail": "This product is no longer available."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
             if quantity > product.stock:
                 return Response(
