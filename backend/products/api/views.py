@@ -1,45 +1,78 @@
 from rest_framework import generics
 from rest_framework.permissions import IsAdminUser
 
-
-from products.models import Product,Category
-from products.api.serializers import ProductSerializer,CategorySerializer
+from products.api.serializers import (
+    CategorySerializer,
+    ProductSerializer,
+    PublicCategorySerializer,
+    PublicProductSerializer,
+)
+from products.models import Category, Product
 
 
 class ProductListCreateView(generics.ListCreateAPIView):
-    queryset = Product.objects.all()
-    serializer_class = ProductSerializer
-
-    # protego las acciones de escritura con get_permissions
     def get_permissions(self):
         if self.request.method == "POST":
             return [IsAdminUser()]
-        return[]
-        
-    
+        return []
+
+    def get_queryset(self):
+        if self.request.user.is_staff:
+            return Product.objects.all()
+        return Product.objects.filter(is_active=True, category__is_active=True)
+
+    def get_serializer_class(self):
+        if self.request.user.is_staff:
+            return ProductSerializer
+        return PublicProductSerializer
+
+
 class ProductDetailView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Product.objects.all()
-    serializer_class = ProductSerializer  
-    # voy proteger tambien las acciones de escritura
     def get_permissions(self):
         if self.request.method in ["PUT", "PATCH", "DELETE"]:
-            return  [IsAdminUser()]
-        return [] 
+            return [IsAdminUser()]
+        return []
+
+    def get_queryset(self):
+        if self.request.user.is_staff:
+            return Product.objects.all()
+        return Product.objects.filter(is_active=True, category__is_active=True)
+
+    def get_serializer_class(self):
+        if self.request.user.is_staff:
+            return ProductSerializer
+        return PublicProductSerializer
 
 
 class CategoryListCreateView(generics.ListCreateAPIView):
-    queryset = Category.objects.all()
-    serializer_class = CategorySerializer
     def get_permissions(self):
-        if self.request.method =="POST":
+        if self.request.method == "POST":
             return [IsAdminUser()]
-        return[]
-    
+        return []
+
+    def get_queryset(self):
+        if self.request.user.is_staff:
+            return Category.objects.all()
+        return Category.objects.filter(is_active=True)
+
+    def get_serializer_class(self):
+        if self.request.user.is_staff:
+            return CategorySerializer
+        return PublicCategorySerializer
+
+
 class CategoryDetailView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Category.objects.all()
-    serializer_class = CategorySerializer  
     def get_permissions(self):
         if self.request.method in ["PUT", "PATCH", "DELETE"]:
             return [IsAdminUser()]
+        return []
 
-        return []  
+    def get_queryset(self):
+        if self.request.user.is_staff:
+            return Category.objects.all()
+        return Category.objects.filter(is_active=True)
+
+    def get_serializer_class(self):
+        if self.request.user.is_staff:
+            return CategorySerializer
+        return PublicCategorySerializer
