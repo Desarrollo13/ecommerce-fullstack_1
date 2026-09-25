@@ -38,6 +38,17 @@ class Order(models.Model):
             )
         ]
 
+    def can_transition_to(self, new_status):
+        allowed_transitions = {
+            self.Status.PENDING: {self.Status.PAID, self.Status.CANCELLED},
+            self.Status.PAID: {self.Status.PROCESSING, self.Status.CANCELLED},
+            self.Status.PROCESSING: {self.Status.SHIPPED, self.Status.CANCELLED},
+            self.Status.SHIPPED: {self.Status.DELIVERED},
+            self.Status.DELIVERED: set(),
+            self.Status.CANCELLED: set(),
+        }
+        return new_status in allowed_transitions.get(self.status, set())
+
 
 class OrderItem(models.Model):
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="items")

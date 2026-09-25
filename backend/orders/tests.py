@@ -16,6 +16,12 @@ class OrderApiTests(APITestCase):
         self.other_user = get_user_model().objects.create_user(
             username="bea", email="bea@example.com", password="secure-password"
         )
+        self.staff = get_user_model().objects.create_user(
+            username="staff",
+            email="staff@example.com",
+            password="secure-password",
+            is_staff=True,
+        )
         category = Category.objects.create(name="Electronics")
         self.product = Product.objects.create(
             name="Headphones",
@@ -84,3 +90,80 @@ class OrderApiTests(APITestCase):
                     quantity=0,
                     line_total="0.00",
                 )
+
+    def create_order_with_item(self, status=Order.Status.PENDING):
+        self.product.stock = 3
+        self.product.save(update_fields=("stock",))
+        order = Order.objects.create(user=self.user, status=status, total="200.00")
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            unit_price="100.00",
+            quantity=2,
+            line_total="200.00",
+        )
+        return order
+
+    def test_staff_can_progress_an_order_through_valid_statuses(self):
+        order = self.create_order_with_item()
+        self.client.force_authenticate(self.staff)
+
+        for new_status in (
+            Order.Status.PAID,
+            Order.Status.PROCESSING,
+            Order.Status.SHIPPED,
+            Order.Status.DELIVERED,
+        ):
+            response = self.client.patch(
+                f"/api/orders/{order.pk}/status/", {"status": new_status}
+            )
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            self.assertEqual(response.data["status"], new_status)
+
+    def test_status_update_requires_staff(self):
+        order = self.create_order_with_item()
+        self.client.force_authenticate(self.user)
+
+        response = self.client.patch(
+            f"/api/orders/{order.pk}/status/", {"status": Order.Status.PAID}
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_invalid_order_transition_is_rejected(self):
+        order = self.create_order_with_item()
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.patch(
+            f"/api/orders/{order.pk}/status/", {"status": Order.Status.SHIPPED}
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.PENDING)
+
+    def test_cancelling_an_order_restores_stock(self):
+        order = self.create_order_with_item()
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.patch(
+            f"/api/orders/{order.pk}/status/", {"status": Order.Status.CANCELLED}
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], Order.Status.CANCELLED)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 5)
+
+    def test_shipped_orders_cannot_be_cancelled(self):
+        order = self.create_order_with_item(status=Order.Status.SHIPPED)
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.patch(
+            f"/api/orders/{order.pk}/status/", {"status": Order.Status.CANCELLED}
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 3)

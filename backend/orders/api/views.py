@@ -3,12 +3,12 @@ from decimal import Decimal
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from cart.models import Cart, CartItem
-from orders.api.serializers import OrderSerializer
+from orders.api.serializers import OrderSerializer, OrderStatusSerializer
 from orders.models import Order, OrderItem
 from products.models import Product
 
@@ -98,4 +98,40 @@ class OrderDetailView(APIView):
         order = get_object_or_404(
             Order.objects.prefetch_related("items"), pk=pk, user=request.user
         )
+        return Response(OrderSerializer(order).data)
+
+
+class OrderStatusUpdateView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def patch(self, request, pk):
+        serializer = OrderStatusSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        new_status = serializer.validated_data["status"]
+
+        with transaction.atomic():
+            order = get_object_or_404(Order.objects.select_for_update(), pk=pk)
+            if not order.can_transition_to(new_status):
+                return Response(
+                    {"detail": "This order status transition is not allowed."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if new_status == Order.Status.CANCELLED:
+                items = list(order.items.select_for_update())
+                products = {
+                    product.pk: product
+                    for product in Product.objects.select_for_update().filter(
+                        pk__in=[item.product_id for item in items if item.product_id]
+                    )
+                }
+                for item in items:
+                    product = products.get(item.product_id)
+                    if product is not None:
+                        product.stock += item.quantity
+                        product.save(update_fields=("stock", "updated_at"))
+
+            order.status = new_status
+            order.save(update_fields=("status", "updated_at"))
+
         return Response(OrderSerializer(order).data)
