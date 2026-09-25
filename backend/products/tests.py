@@ -3,6 +3,7 @@ from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from cart.models import Cart, CartItem
 from products.models import Category, Product
 
 
@@ -112,3 +113,23 @@ class ProductApiTests(APITestCase):
                     stock=1,
                     category=self.active_category,
                 )
+
+    def test_product_deletion_deactivates_it_and_preserves_cart_items(self):
+        cart = Cart.objects.create(user=self.staff)
+        cart_item = CartItem.objects.create(cart=cart, product=self.public_product)
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.delete(f"/api/products/{self.public_product.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.public_product.refresh_from_db()
+        self.assertFalse(self.public_product.is_active)
+        self.assertTrue(CartItem.objects.filter(pk=cart_item.pk).exists())
+
+    def test_category_deletion_returns_conflict_when_it_has_products(self):
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.delete(f"/api/categories/{self.active_category.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertTrue(Category.objects.filter(pk=self.active_category.pk).exists())
