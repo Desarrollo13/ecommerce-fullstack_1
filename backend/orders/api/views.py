@@ -1,5 +1,8 @@
 from decimal import Decimal
 
+import mercadopago
+
+from django.conf import settings
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import status
@@ -8,7 +11,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from cart.models import Cart, CartItem
-from orders.api.serializers import OrderSerializer, OrderStatusSerializer
+from orders.api.serializers import (
+    CheckoutSerializer,
+    OrderSerializer,
+    OrderStatusSerializer,
+    PaymentStatusSerializer,
+)
 from orders.models import Order, OrderItem
 from products.models import Product
 
@@ -21,6 +29,9 @@ class OrderListCreateView(APIView):
         return Response(OrderSerializer(orders, many=True).data)
 
     def post(self, request):
+        serializer = CheckoutSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
         with transaction.atomic():
             try:
                 cart = Cart.objects.select_for_update().get(user=request.user)
@@ -66,7 +77,12 @@ class OrderListCreateView(APIView):
                 ),
                 Decimal("0.00"),
             )
-            order = Order.objects.create(user=request.user, total=total)
+            order = Order.objects.create(
+                user=request.user,
+                shipping_address=serializer.validated_data["shipping_address"],
+                payment_method=serializer.validated_data["payment_method"],
+                total=total,
+            )
             OrderItem.objects.bulk_create(
                 [
                     OrderItem(
@@ -101,6 +117,75 @@ class OrderDetailView(APIView):
         return Response(OrderSerializer(order).data)
 
 
+class PaymentPreferenceView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        order = get_object_or_404(Order.objects.prefetch_related("items"), pk=pk, user=request.user)
+        if order.status == Order.Status.CANCELLED:
+            return Response(
+                {"detail": "Cancelled orders cannot be paid."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if order.payment_status != Order.PaymentStatus.PENDING:
+            return Response(
+                {"detail": "This order is no longer awaiting payment."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if order.payment_method == Order.PaymentMethod.CASH_ON_DELIVERY:
+            return Response(
+                {"detail": "Cash on delivery orders do not require an online payment."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not settings.MERCADOPAGO_ACCESS_TOKEN:
+            return Response(
+                {"detail": "Mercado Pago is not configured."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        preference_data = {
+            "items": [
+                {
+                    "id": str(item.product_id or item.pk),
+                    "title": item.product_name,
+                    "quantity": item.quantity,
+                    "unit_price": float(item.unit_price),
+                    "currency_id": "ARS",
+                }
+                for item in order.items.all()
+            ],
+            "external_reference": str(order.pk),
+            "metadata": {"order_id": order.pk},
+        }
+        result = mercadopago.SDK(settings.MERCADOPAGO_ACCESS_TOKEN).preference().create(
+            preference_data
+        )
+        preference = result.get("response", {})
+        if result.get("status") not in (200, 201) or not preference.get("id"):
+            return Response(
+                {"detail": "Could not create the Mercado Pago payment preference."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        order.payment_provider = Order.PaymentProvider.MERCADO_PAGO
+        order.provider_preference_id = preference["id"]
+        order.save(
+            update_fields=(
+                "payment_provider",
+                "provider_preference_id",
+                "updated_at",
+            )
+        )
+        return Response(
+            {
+                "preference_id": preference["id"],
+                "init_point": preference.get("init_point"),
+                "sandbox_init_point": preference.get("sandbox_init_point"),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
 class OrderStatusUpdateView(APIView):
     permission_classes = [IsAdminUser]
 
@@ -114,6 +199,15 @@ class OrderStatusUpdateView(APIView):
             if not order.can_transition_to(new_status):
                 return Response(
                     {"detail": "This order status transition is not allowed."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if (
+                new_status == Order.Status.PROCESSING
+                and order.payment_status != Order.PaymentStatus.PAID
+            ):
+                return Response(
+                    {"detail": "The order must be paid before processing."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
@@ -133,5 +227,27 @@ class OrderStatusUpdateView(APIView):
 
             order.status = new_status
             order.save(update_fields=("status", "updated_at"))
+
+        return Response(OrderSerializer(order).data)
+
+
+class PaymentStatusUpdateView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def patch(self, request, pk):
+        serializer = PaymentStatusSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        new_status = serializer.validated_data["payment_status"]
+
+        with transaction.atomic():
+            order = get_object_or_404(Order.objects.select_for_update(), pk=pk)
+            if not order.can_transition_payment_to(new_status):
+                return Response(
+                    {"detail": "This payment status transition is not allowed."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            order.payment_status = new_status
+            order.save(update_fields=("payment_status", "updated_at"))
 
         return Response(OrderSerializer(order).data)

@@ -10,16 +10,41 @@ from products.models import Product
 class Order(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
-        PAID = "paid", "Paid"
         PROCESSING = "processing", "Processing"
         SHIPPED = "shipped", "Shipped"
         DELIVERED = "delivered", "Delivered"
         CANCELLED = "cancelled", "Cancelled"
 
+    class PaymentMethod(models.TextChoices):
+        CARD = "card", "Card"
+        BANK_TRANSFER = "bank_transfer", "Bank transfer"
+        CASH_ON_DELIVERY = "cash_on_delivery", "Cash on delivery"
+
+    class PaymentStatus(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PAID = "paid", "Paid"
+        FAILED = "failed", "Failed"
+        REFUNDED = "refunded", "Refunded"
+
+    class PaymentProvider(models.TextChoices):
+        MERCADO_PAGO = "mercadopago", "Mercado Pago"
+
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="orders"
     )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    shipping_address = models.CharField(max_length=500, default="")
+    payment_method = models.CharField(
+        max_length=20, choices=PaymentMethod.choices, default=PaymentMethod.CARD
+    )
+    payment_status = models.CharField(
+        max_length=20, choices=PaymentStatus.choices, default=PaymentStatus.PENDING
+    )
+    payment_provider = models.CharField(
+        max_length=20, choices=PaymentProvider.choices, blank=True, default=""
+    )
+    provider_preference_id = models.CharField(max_length=100, blank=True, default="")
+    provider_payment_id = models.CharField(max_length=100, blank=True, default="")
     total = models.DecimalField(
         max_digits=12,
         decimal_places=2,
@@ -40,14 +65,25 @@ class Order(models.Model):
 
     def can_transition_to(self, new_status):
         allowed_transitions = {
-            self.Status.PENDING: {self.Status.PAID, self.Status.CANCELLED},
-            self.Status.PAID: {self.Status.PROCESSING, self.Status.CANCELLED},
+            self.Status.PENDING: {self.Status.PROCESSING, self.Status.CANCELLED},
             self.Status.PROCESSING: {self.Status.SHIPPED, self.Status.CANCELLED},
             self.Status.SHIPPED: {self.Status.DELIVERED},
             self.Status.DELIVERED: set(),
             self.Status.CANCELLED: set(),
         }
         return new_status in allowed_transitions.get(self.status, set())
+
+    def can_transition_payment_to(self, new_status):
+        allowed_transitions = {
+            self.PaymentStatus.PENDING: {
+                self.PaymentStatus.PAID,
+                self.PaymentStatus.FAILED,
+            },
+            self.PaymentStatus.PAID: {self.PaymentStatus.REFUNDED},
+            self.PaymentStatus.FAILED: {self.PaymentStatus.PAID},
+            self.PaymentStatus.REFUNDED: set(),
+        }
+        return new_status in allowed_transitions.get(self.payment_status, set())
 
 
 class OrderItem(models.Model):
