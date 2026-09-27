@@ -188,6 +188,14 @@ class PaymentPreferenceView(APIView):
         }
         if settings.MERCADOPAGO_WEBHOOK_URL:
             preference_data["notification_url"] = settings.MERCADOPAGO_WEBHOOK_URL
+        if settings.FRONTEND_URL:
+            result_url = f"{settings.FRONTEND_URL}/payment-result"
+            preference_data["back_urls"] = {
+                "success": result_url,
+                "pending": result_url,
+                "failure": result_url,
+            }
+            preference_data["auto_return"] = "approved"
         result = mercadopago.SDK(settings.MERCADOPAGO_ACCESS_TOKEN).preference().create(
             preference_data
         )

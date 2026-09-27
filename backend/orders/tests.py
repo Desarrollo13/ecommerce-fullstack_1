@@ -103,6 +103,7 @@ class OrderApiTests(APITestCase):
     @override_settings(
         MERCADOPAGO_ACCESS_TOKEN="TEST-access-token",
         MERCADOPAGO_WEBHOOK_URL="https://example.test/api/orders/payments/webhook/",
+        FRONTEND_URL="http://localhost:5173",
     )
     @patch("orders.api.views.mercadopago.SDK")
     def test_user_can_create_a_mercadopago_payment_preference(self, mock_sdk):
@@ -131,6 +132,11 @@ class OrderApiTests(APITestCase):
             preference_data["notification_url"],
             "https://example.test/api/orders/payments/webhook/",
         )
+        self.assertEqual(
+            preference_data["back_urls"]["success"],
+            "http://localhost:5173/payment-result",
+        )
+        self.assertEqual(preference_data["auto_return"], "approved")
         order.refresh_from_db()
         self.assertEqual(order.payment_provider, Order.PaymentProvider.MERCADO_PAGO)
         self.assertEqual(order.provider_preference_id, "preference-123")
