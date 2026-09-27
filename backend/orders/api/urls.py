@@ -4,6 +4,7 @@ from orders.api.views import (
     OrderDetailView,
     OrderListCreateView,
     PaymentPreferenceView,
+    MercadoPagoWebhookView,
     OrderStatusUpdateView,
     PaymentStatusUpdateView,
 )
@@ -11,6 +12,7 @@ from orders.api.views import (
 
 urlpatterns = [
     path("", OrderListCreateView.as_view(), name="order-list-create"),
+    path("payments/webhook/", MercadoPagoWebhookView.as_view(), name="mercadopago-webhook"),
     path("<int:pk>/", OrderDetailView.as_view(), name="order-detail"),
     path(
         "<int:pk>/payment-preference/",

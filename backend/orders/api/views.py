@@ -1,10 +1,13 @@
-from decimal import Decimal
+import hashlib
+import hmac
+from decimal import Decimal, InvalidOperation
 
 import mercadopago
 
 from django.conf import settings
 from django.db import transaction
 from django.shortcuts import get_object_or_404
+from django.utils.crypto import constant_time_compare
 from rest_framework import status
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
@@ -19,6 +22,32 @@ from orders.api.serializers import (
 )
 from orders.models import Order, OrderItem
 from products.models import Product
+
+
+def is_valid_mercadopago_signature(request, data_id):
+    if not settings.MERCADOPAGO_WEBHOOK_SECRET:
+        return False
+
+    signature = request.headers.get("x-signature", "")
+    values = dict(
+        value.split("=", 1)
+        for value in signature.split(",")
+        if "=" in value
+    )
+    timestamp = values.get("ts")
+    received_hash = values.get("v1")
+    if not timestamp or not received_hash:
+        return False
+
+    manifest = (
+        f"id:{data_id};request-id:{request.headers.get('x-request-id', '')};ts:{timestamp};"
+    )
+    expected_hash = hmac.new(
+        settings.MERCADOPAGO_WEBHOOK_SECRET.encode(),
+        manifest.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    return constant_time_compare(expected_hash, received_hash)
 
 
 class OrderListCreateView(APIView):
@@ -157,6 +186,8 @@ class PaymentPreferenceView(APIView):
             "external_reference": str(order.pk),
             "metadata": {"order_id": order.pk},
         }
+        if settings.MERCADOPAGO_WEBHOOK_URL:
+            preference_data["notification_url"] = settings.MERCADOPAGO_WEBHOOK_URL
         result = mercadopago.SDK(settings.MERCADOPAGO_ACCESS_TOKEN).preference().create(
             preference_data
         )
@@ -184,6 +215,72 @@ class PaymentPreferenceView(APIView):
             },
             status=status.HTTP_201_CREATED,
         )
+
+
+class MercadoPagoWebhookView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request):
+        data_id = str(
+            request.data.get("data", {}).get("id")
+            or request.query_params.get("data.id")
+            or request.query_params.get("id", "")
+        )
+        notification_type = (
+            request.data.get("type")
+            or request.query_params.get("type")
+            or request.query_params.get("topic")
+        )
+        if notification_type != "payment" or not data_id:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        is_legacy_ipn = request.query_params.get("topic") == "payment"
+        if not is_legacy_ipn and not is_valid_mercadopago_signature(request, data_id):
+            return Response(status=status.HTTP_401_UNAUTHORIZED)
+        if not settings.MERCADOPAGO_ACCESS_TOKEN:
+            return Response(status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        result = mercadopago.SDK(settings.MERCADOPAGO_ACCESS_TOKEN).payment().get(data_id)
+        payment = result.get("response", {})
+        if result.get("status") == 404:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        if result.get("status") != 200 or not payment:
+            return Response(status=status.HTTP_502_BAD_GATEWAY)
+
+        try:
+            order_id = int(payment.get("external_reference", ""))
+            transaction_amount = Decimal(str(payment["transaction_amount"]))
+        except (KeyError, TypeError, ValueError, InvalidOperation):
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        with transaction.atomic():
+            order = Order.objects.select_for_update().filter(
+                pk=order_id,
+                payment_provider=Order.PaymentProvider.MERCADO_PAGO,
+            ).first()
+            if order is None or order.status == Order.Status.CANCELLED:
+                return Response(status=status.HTTP_204_NO_CONTENT)
+            if transaction_amount != order.total:
+                return Response(status=status.HTTP_204_NO_CONTENT)
+
+            payment_statuses = {
+                "approved": Order.PaymentStatus.PAID,
+                "rejected": Order.PaymentStatus.FAILED,
+                "cancelled": Order.PaymentStatus.FAILED,
+                "refunded": Order.PaymentStatus.REFUNDED,
+                "charged_back": Order.PaymentStatus.REFUNDED,
+            }
+            new_status = payment_statuses.get(payment.get("status"))
+            if new_status is None:
+                return Response(status=status.HTTP_204_NO_CONTENT)
+            if new_status != order.payment_status and not order.can_transition_payment_to(new_status):
+                return Response(status=status.HTTP_204_NO_CONTENT)
+
+            order.payment_status = new_status
+            order.provider_payment_id = data_id
+            order.save(update_fields=("payment_status", "provider_payment_id", "updated_at"))
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class OrderStatusUpdateView(APIView):

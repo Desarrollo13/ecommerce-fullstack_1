@@ -20,3 +20,6 @@
 - Public registration is `POST /api/auth/register/`; it creates customer users and never accepts a role or staff status.
 - JWT access and refresh endpoints are `/api/auth/token/` and `/api/auth/token/refresh/`; access tokens last 15 minutes and refresh tokens one day.
 - `Product.category` uses `on_delete=PROTECT`, so category deletion must account for existing products.
+- Mercado Pago preferences are created at `POST /api/orders/<id>/payment-preference/`. Sandbox uses an `MERCADOPAGO_ACCESS_TOKEN` beginning with `TEST-`, never a production `APP_USR-` token.
+- Configure `MERCADOPAGO_WEBHOOK_SECRET` and `MERCADOPAGO_WEBHOOK_URL` in `.env`. The webhook endpoint is `POST /api/orders/payments/webhook/`; it verifies signed Webhooks and safely handles legacy `topic=payment` notifications by fetching and validating the provider payment.
+- A provider payment changes an order only when its external reference and amount match. It stores `provider_payment_id` and maps approved, rejected/cancelled, and refunded/charged-back payments to the internal payment state.
