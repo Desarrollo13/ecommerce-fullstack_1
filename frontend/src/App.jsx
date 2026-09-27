@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useEffectEvent, useState } from 'react'
 import './App.css'
 
 const accessTokenKey = 'ecommerce-access-token'
@@ -6,6 +6,7 @@ const accessTokenKey = 'ecommerce-access-token'
 async function api(path, options = {}, token = '') {
   const response = await fetch(`/api${path}`, {
     ...options,
+    credentials: 'same-origin',
     headers: {
       ...(options.body ? { 'Content-Type': 'application/json' } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -18,7 +19,9 @@ async function api(path, options = {}, token = '') {
   const data = await response.json().catch(() => ({}))
   if (!response.ok) {
     const message = data.detail || Object.values(data).flat().join(' ')
-    throw new Error(message || 'No se pudo completar la solicitud.')
+    const error = new Error(message || 'No se pudo completar la solicitud.')
+    error.status = response.status
+    throw error
   }
   return data
 }
@@ -38,9 +41,30 @@ function App() {
   const [password, setPassword] = useState('')
   const [shippingAddress, setShippingAddress] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('card')
-  const [orders, setOrders] = useState([])
+  const [paymentOrder, setPaymentOrder] = useState(null)
+  const [paymentOrderError, setPaymentOrderError] = useState('')
   const [message, setMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+
+  async function authenticatedApi(path, options = {}) {
+    try {
+      return await api(path, options, token)
+    } catch (error) {
+      if (error.status !== 401) throw error
+
+      try {
+        const session = await api('/auth/token/refresh/', { method: 'POST' })
+        localStorage.setItem(accessTokenKey, session.access)
+        setToken(session.access)
+        return await api(path, options, session.access)
+      } catch (refreshError) {
+        localStorage.removeItem(accessTokenKey)
+        setToken('')
+        setCart(null)
+        throw refreshError
+      }
+    }
+  }
 
   useEffect(() => {
     api('/products/')
@@ -48,25 +72,48 @@ function App() {
       .catch((error) => setMessage(error.message))
   }, [])
 
+  const loadCart = useEffectEvent(async () => {
+    try {
+      setCart(await authenticatedApi('/cart/'))
+    } catch (error) {
+      setMessage(error.message)
+    }
+  })
+
   useEffect(() => {
     if (!token) return
-
-    api('/cart/', {}, token)
-      .then(setCart)
-      .catch((error) => {
-        localStorage.removeItem(accessTokenKey)
-        setToken('')
-        setMessage(error.message)
-      })
+    const timerId = window.setTimeout(loadCart, 0)
+    return () => window.clearTimeout(timerId)
   }, [token])
+
+  const paymentOrderId = Number(new URLSearchParams(window.location.search).get('order_id'))
+  const paymentStatus = paymentOrder?.payment_status
+
+  const loadPaymentOrder = useEffectEvent(async () => {
+    try {
+      setPaymentOrder(await authenticatedApi(`/orders/${paymentOrderId}/`))
+      setPaymentOrderError('')
+    } catch (error) {
+      setPaymentOrderError(error.message)
+    }
+  })
 
   useEffect(() => {
-    if (window.location.pathname !== '/payment-result' || !token) return
+    if (
+      window.location.pathname !== '/payment-result'
+      || !token
+      || !Number.isInteger(paymentOrderId)
+      || paymentOrderId < 1
+      || (paymentStatus && paymentStatus !== 'pending')
+    ) return
 
-    api('/orders/', {}, token)
-      .then(setOrders)
-      .catch((error) => setMessage(error.message))
-  }, [token])
+    const initialTimerId = window.setTimeout(loadPaymentOrder, 0)
+    const intervalId = window.setInterval(loadPaymentOrder, 5000)
+    return () => {
+      window.clearTimeout(initialTimerId)
+      window.clearInterval(intervalId)
+    }
+  }, [token, paymentOrderId, paymentStatus])
 
   async function login(event) {
     event.preventDefault()
@@ -95,11 +142,11 @@ function App() {
     setIsLoading(true)
     setMessage('')
     try {
-      await api('/cart/items/', {
+      await authenticatedApi('/cart/items/', {
         method: 'POST',
         body: JSON.stringify({ product_id: productId, quantity: 1 }),
-      }, token)
-      setCart(await api('/cart/', {}, token))
+      })
+      setCart(await authenticatedApi('/cart/'))
     } catch (error) {
       setMessage(error.message)
     } finally {
@@ -112,11 +159,11 @@ function App() {
     setIsLoading(true)
     setMessage('')
     try {
-      await api(`/cart/items/${itemId}/`, {
+      await authenticatedApi(`/cart/items/${itemId}/`, {
         method: 'PATCH',
         body: JSON.stringify({ quantity }),
-      }, token)
-      setCart(await api('/cart/', {}, token))
+      })
+      setCart(await authenticatedApi('/cart/'))
     } catch (error) {
       setMessage(error.message)
     } finally {
@@ -128,8 +175,8 @@ function App() {
     setIsLoading(true)
     setMessage('')
     try {
-      await api(`/cart/items/${itemId}/`, { method: 'DELETE' }, token)
-      setCart(await api('/cart/', {}, token))
+      await authenticatedApi(`/cart/items/${itemId}/`, { method: 'DELETE' })
+      setCart(await authenticatedApi('/cart/'))
     } catch (error) {
       setMessage(error.message)
     } finally {
@@ -142,30 +189,41 @@ function App() {
     setIsLoading(true)
     setMessage('')
     try {
-      const order = await api('/orders/', {
+      const order = await authenticatedApi('/orders/', {
         method: 'POST',
         body: JSON.stringify({
           shipping_address: shippingAddress,
           payment_method: paymentMethod,
         }),
-      }, token)
+      })
 
       if (paymentMethod === 'cash_on_delivery') {
-        setCart(await api('/cart/', {}, token))
+        setCart(await authenticatedApi('/cart/'))
         setMessage(`Pedido #${order.id} creado. Pagarás al recibirlo.`)
         return
       }
 
-      const preference = await api(`/orders/${order.id}/payment-preference/`, {
+      const preference = await authenticatedApi(`/orders/${order.id}/payment-preference/`, {
         method: 'POST',
-      }, token)
-      const checkoutUrl = preference.sandbox_init_point || preference.init_point
+      })
+      const checkoutUrl = preference.checkout_url || preference.sandbox_init_point || preference.init_point
       if (!checkoutUrl) throw new Error('Mercado Pago no devolvió una URL de pago.')
       window.location.assign(checkoutUrl)
     } catch (error) {
       setMessage(error.message)
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  async function logout() {
+    try {
+      await api('/auth/logout/', { method: 'POST' })
+    } finally {
+      localStorage.removeItem(accessTokenKey)
+      setToken('')
+      setCart(null)
+      setMessage('Sesión cerrada.')
     }
   }
 
@@ -176,19 +234,23 @@ function App() {
   )
 
   if (window.location.pathname === '/payment-result') {
+    const hasPaymentOrderId = Number.isInteger(paymentOrderId) && paymentOrderId > 0
     return (
       <main className="payment-result">
-        <p className="eyebrow">PAGO RECIBIDO</p>
+        <p className="eyebrow">ESTADO DEL PAGO</p>
         <h1>Estamos verificando tu pago.</h1>
-        <p>Mercado Pago confirma el resultado mediante el webhook. Este listado muestra el estado real de tus pedidos.</p>
+        <p>Mercado Pago confirma el resultado mediante el webhook.</p>
+        {!hasPaymentOrderId && <p className="notice">No encontramos el pedido asociado al pago.</p>}
         {!token && <p className="notice">Iniciá sesión en la tienda para consultar tu pedido.</p>}
-        {token && orders.length === 0 && <p className="muted">Cargando tus pedidos...</p>}
-        {orders.map((order) => (
-          <article className="order-card" key={order.id}>
-            <div><span>Pedido #{order.id}</span><strong>{formatPrice(order.total)}</strong></div>
-            <p>Pago: <b>{order.payment_status}</b> · Pedido: <b>{order.status}</b></p>
+        {token && hasPaymentOrderId && !paymentOrder && !paymentOrderError && <p className="muted">Cargando tu pedido...</p>}
+        {paymentOrderError && <p className="notice">{paymentOrderError}</p>}
+        {paymentOrder && (
+          <article className="order-card">
+            <div><span>Pedido #{paymentOrder.id}</span><strong>{formatPrice(paymentOrder.total)}</strong></div>
+            <p>Pago: <b>{paymentOrder.payment_status}</b> · Pedido: <b>{paymentOrder.status}</b></p>
+            {paymentOrder.payment_status === 'pending' && <p className="muted">Actualizamos este estado automáticamente.</p>}
           </article>
-        ))}
+        )}
         <a className="button" href="/">Volver a la tienda</a>
       </main>
     )
@@ -205,12 +267,7 @@ function App() {
           <button
             className="button secondary"
             type="button"
-            onClick={() => {
-              localStorage.removeItem(accessTokenKey)
-              setToken('')
-              setCart(null)
-              setMessage('Sesión cerrada.')
-            }}
+            onClick={logout}
           >
             Cerrar sesión
           </button>

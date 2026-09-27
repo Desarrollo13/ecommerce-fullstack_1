@@ -1,9 +1,11 @@
 import hashlib
 import hmac
+from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.test import override_settings
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 from unittest.mock import patch
@@ -134,12 +136,112 @@ class OrderApiTests(APITestCase):
         )
         self.assertEqual(
             preference_data["back_urls"]["success"],
-            "http://localhost:5173/payment-result",
+            f"http://localhost:5173/payment-result?order_id={order.pk}",
         )
         self.assertEqual(preference_data["auto_return"], "approved")
         order.refresh_from_db()
         self.assertEqual(order.payment_provider, Order.PaymentProvider.MERCADO_PAGO)
         self.assertEqual(order.provider_preference_id, "preference-123")
+        self.assertEqual(
+            order.provider_checkout_url,
+            "https://www.mercadopago.com/checkout/v1/redirect?pref_id=preference-123",
+        )
+        self.assertTrue(preference_data["expires"])
+        self.assertEqual(
+            preference_data["expiration_date_to"],
+            (order.created_at + timedelta(minutes=30)).isoformat(),
+        )
+
+    @override_settings(MERCADOPAGO_ACCESS_TOKEN="TEST-access-token")
+    @patch("orders.api.views.mercadopago.SDK")
+    def test_user_reuses_an_existing_payment_preference(self, mock_sdk):
+        order = self.create_order_with_item()
+        order.payment_provider = Order.PaymentProvider.MERCADO_PAGO
+        order.provider_preference_id = "preference-123"
+        order.provider_checkout_url = "https://www.mercadopago.com/checkout/v1/redirect?pref_id=preference-123"
+        order.save(
+            update_fields=(
+                "payment_provider",
+                "provider_preference_id",
+                "provider_checkout_url",
+            )
+        )
+        self.client.force_authenticate(self.user)
+
+        response = self.client.post(f"/api/orders/{order.pk}/payment-preference/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["preference_id"], "preference-123")
+        self.assertEqual(response.data["checkout_url"], order.provider_checkout_url)
+        mock_sdk.assert_not_called()
+
+    @override_settings(MERCADOPAGO_ACCESS_TOKEN="TEST-access-token")
+    @patch("orders.api.views.mercadopago.SDK")
+    def test_failed_payment_creates_a_replacement_preference(self, mock_sdk):
+        order = self.create_order_with_item()
+        order.payment_status = Order.PaymentStatus.FAILED
+        order.payment_provider = Order.PaymentProvider.MERCADO_PAGO
+        order.provider_preference_id = "rejected-preference"
+        order.provider_checkout_url = "https://example.test/rejected-preference"
+        order.save(
+            update_fields=(
+                "payment_status",
+                "payment_provider",
+                "provider_preference_id",
+                "provider_checkout_url",
+            )
+        )
+        mock_sdk.return_value.preference.return_value.create.return_value = {
+            "status": 201,
+            "response": {
+                "id": "replacement-preference",
+                "init_point": "https://example.test/replacement-preference",
+            },
+        }
+        self.client.force_authenticate(self.user)
+
+        response = self.client.post(f"/api/orders/{order.pk}/payment-preference/")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        order.refresh_from_db()
+        self.assertEqual(order.payment_status, Order.PaymentStatus.PENDING)
+        self.assertEqual(order.provider_preference_id, "replacement-preference")
+        self.assertEqual(
+            order.provider_checkout_url,
+            "https://example.test/replacement-preference",
+        )
+
+    @override_settings(MERCADOPAGO_ACCESS_TOKEN="TEST-access-token")
+    @patch("orders.api.views.mercadopago.SDK")
+    def test_expired_reservation_is_cancelled_and_releases_stock(self, mock_sdk):
+        order = self.create_order_with_item()
+        order.payment_expires_at = timezone.now() - timedelta(minutes=1)
+        order.save(update_fields=("payment_expires_at",))
+        self.client.force_authenticate(self.user)
+
+        response = self.client.post(f"/api/orders/{order.pk}/payment-preference/")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        mock_sdk.assert_not_called()
+        order.refresh_from_db()
+        self.product.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.CANCELLED)
+        self.assertEqual(self.product.stock, 5)
+
+    def test_checkout_releases_expired_reservations_before_validating_stock(self):
+        expired_order = self.create_order_with_item()
+        expired_order.payment_expires_at = timezone.now() - timedelta(minutes=1)
+        expired_order.save(update_fields=("payment_expires_at",))
+        CartItem.objects.create(cart=self.cart, product=self.product, quantity=4)
+        self.client.force_authenticate(self.user)
+
+        response = self.client.post("/api/orders/", self.checkout_data())
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        expired_order.refresh_from_db()
+        self.product.refresh_from_db()
+        self.assertEqual(expired_order.status, Order.Status.CANCELLED)
+        self.assertEqual(self.product.stock, 1)
 
     @override_settings(MERCADOPAGO_ACCESS_TOKEN="")
     def test_payment_preference_requires_mercadopago_configuration(self):
@@ -407,6 +509,22 @@ class OrderApiTests(APITestCase):
         self.assertEqual(response.data["status"], Order.Status.CANCELLED)
         self.product.refresh_from_db()
         self.assertEqual(self.product.stock, 5)
+
+    def test_paid_orders_cannot_be_cancelled_or_restore_stock(self):
+        order = self.create_order_with_item()
+        order.payment_status = Order.PaymentStatus.PAID
+        order.save(update_fields=("payment_status",))
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.patch(
+            f"/api/orders/{order.pk}/status/", {"status": Order.Status.CANCELLED}
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        order.refresh_from_db()
+        self.product.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.PENDING)
+        self.assertEqual(self.product.stock, 3)
 
     def test_shipped_orders_cannot_be_cancelled(self):
         order = self.create_order_with_item(status=Order.Status.SHIPPED)

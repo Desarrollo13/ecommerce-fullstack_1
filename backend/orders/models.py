@@ -44,7 +44,9 @@ class Order(models.Model):
         max_length=20, choices=PaymentProvider.choices, blank=True, default=""
     )
     provider_preference_id = models.CharField(max_length=100, blank=True, default="")
+    provider_checkout_url = models.CharField(max_length=500, blank=True, default="")
     provider_payment_id = models.CharField(max_length=100, blank=True, default="")
+    payment_expires_at = models.DateTimeField(null=True, blank=True)
     total = models.DecimalField(
         max_digits=12,
         decimal_places=2,
@@ -80,7 +82,10 @@ class Order(models.Model):
                 self.PaymentStatus.FAILED,
             },
             self.PaymentStatus.PAID: {self.PaymentStatus.REFUNDED},
-            self.PaymentStatus.FAILED: {self.PaymentStatus.PAID},
+            self.PaymentStatus.FAILED: {
+                self.PaymentStatus.PENDING,
+                self.PaymentStatus.PAID,
+            },
             self.PaymentStatus.REFUNDED: set(),
         }
         return new_status in allowed_transitions.get(self.payment_status, set())

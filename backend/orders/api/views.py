@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
 import mercadopago
@@ -8,6 +9,7 @@ from django.conf import settings
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils.crypto import constant_time_compare
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
@@ -21,6 +23,7 @@ from orders.api.serializers import (
     PaymentStatusSerializer,
 )
 from orders.models import Order, OrderItem
+from orders.services import PAYMENT_RESERVATION_MINUTES, expire_payment_reservations
 from products.models import Product
 
 
@@ -62,6 +65,7 @@ class OrderListCreateView(APIView):
         serializer.is_valid(raise_exception=True)
 
         with transaction.atomic():
+            expire_payment_reservations()
             try:
                 cart = Cart.objects.select_for_update().get(user=request.user)
             except Cart.DoesNotExist:
@@ -111,6 +115,12 @@ class OrderListCreateView(APIView):
                 shipping_address=serializer.validated_data["shipping_address"],
                 payment_method=serializer.validated_data["payment_method"],
                 total=total,
+                payment_expires_at=(
+                    timezone.now() + timedelta(minutes=PAYMENT_RESERVATION_MINUTES)
+                    if serializer.validated_data["payment_method"]
+                    != Order.PaymentMethod.CASH_ON_DELIVERY
+                    else None
+                ),
             )
             OrderItem.objects.bulk_create(
                 [
@@ -150,79 +160,119 @@ class PaymentPreferenceView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
-        order = get_object_or_404(Order.objects.prefetch_related("items"), pk=pk, user=request.user)
-        if order.status == Order.Status.CANCELLED:
-            return Response(
-                {"detail": "Cancelled orders cannot be paid."},
-                status=status.HTTP_400_BAD_REQUEST,
+        with transaction.atomic():
+            expire_payment_reservations()
+            order = get_object_or_404(
+                Order.objects.select_for_update().prefetch_related("items"),
+                pk=pk,
+                user=request.user,
             )
-        if order.payment_status != Order.PaymentStatus.PENDING:
-            return Response(
-                {"detail": "This order is no longer awaiting payment."},
-                status=status.HTTP_400_BAD_REQUEST,
+            if order.status == Order.Status.CANCELLED:
+                return Response(
+                    {"detail": "Cancelled orders cannot be paid."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if order.payment_status not in (
+                Order.PaymentStatus.PENDING,
+                Order.PaymentStatus.FAILED,
+            ):
+                return Response(
+                    {"detail": "This order is no longer awaiting payment."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if order.payment_method == Order.PaymentMethod.CASH_ON_DELIVERY:
+                return Response(
+                    {"detail": "Cash on delivery orders do not require an online payment."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if not settings.MERCADOPAGO_ACCESS_TOKEN:
+                return Response(
+                    {"detail": "Mercado Pago is not configured."},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+            if (
+                order.payment_status == Order.PaymentStatus.PENDING
+                and order.provider_checkout_url
+            ):
+                return Response(
+                    {
+                        "preference_id": order.provider_preference_id,
+                        "checkout_url": order.provider_checkout_url,
+                    }
+                )
+            if order.payment_status == Order.PaymentStatus.PENDING and order.provider_preference_id:
+                return Response(
+                    {"detail": "A payment preference already exists for this order."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            payment_expires_at = order.payment_expires_at or (
+                order.created_at
+                + timedelta(minutes=PAYMENT_RESERVATION_MINUTES)
             )
-        if order.payment_method == Order.PaymentMethod.CASH_ON_DELIVERY:
-            return Response(
-                {"detail": "Cash on delivery orders do not require an online payment."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if not settings.MERCADOPAGO_ACCESS_TOKEN:
-            return Response(
-                {"detail": "Mercado Pago is not configured."},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-
-        preference_data = {
-            "items": [
-                {
-                    "id": str(item.product_id or item.pk),
-                    "title": item.product_name,
-                    "quantity": item.quantity,
-                    "unit_price": float(item.unit_price),
-                    "currency_id": "ARS",
-                }
-                for item in order.items.all()
-            ],
-            "external_reference": str(order.pk),
-            "metadata": {"order_id": order.pk},
-        }
-        if settings.MERCADOPAGO_WEBHOOK_URL:
-            preference_data["notification_url"] = settings.MERCADOPAGO_WEBHOOK_URL
-        if settings.FRONTEND_URL:
-            result_url = f"{settings.FRONTEND_URL}/payment-result"
-            preference_data["back_urls"] = {
-                "success": result_url,
-                "pending": result_url,
-                "failure": result_url,
+            preference_data = {
+                "items": [
+                    {
+                        "id": str(item.product_id or item.pk),
+                        "title": item.product_name,
+                        "quantity": item.quantity,
+                        "unit_price": float(item.unit_price),
+                        "currency_id": "ARS",
+                    }
+                    for item in order.items.all()
+                ],
+                "external_reference": str(order.pk),
+                "metadata": {"order_id": order.pk},
+                "expires": True,
+                "expiration_date_to": payment_expires_at.isoformat(),
             }
-            preference_data["auto_return"] = "approved"
-        result = mercadopago.SDK(settings.MERCADOPAGO_ACCESS_TOKEN).preference().create(
-            preference_data
-        )
-        preference = result.get("response", {})
-        if result.get("status") not in (200, 201) or not preference.get("id"):
-            return Response(
-                {"detail": "Could not create the Mercado Pago payment preference."},
-                status=status.HTTP_502_BAD_GATEWAY,
+            if settings.MERCADOPAGO_WEBHOOK_URL:
+                preference_data["notification_url"] = settings.MERCADOPAGO_WEBHOOK_URL
+            if settings.FRONTEND_URL:
+                result_url = f"{settings.FRONTEND_URL}/payment-result?order_id={order.pk}"
+                preference_data["back_urls"] = {
+                    "success": result_url,
+                    "pending": result_url,
+                    "failure": result_url,
+                }
+                preference_data["auto_return"] = "approved"
+            result = mercadopago.SDK(settings.MERCADOPAGO_ACCESS_TOKEN).preference().create(
+                preference_data
             )
+            preference = result.get("response", {})
+            if result.get("status") not in (200, 201) or not preference.get("id"):
+                return Response(
+                    {"detail": "Could not create the Mercado Pago payment preference."},
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
+            checkout_url = preference.get("sandbox_init_point") or preference.get("init_point")
+            if not checkout_url:
+                return Response(
+                    {"detail": "Mercado Pago did not return a checkout URL."},
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
 
-        order.payment_provider = Order.PaymentProvider.MERCADO_PAGO
-        order.provider_preference_id = preference["id"]
-        order.save(
-            update_fields=(
-                "payment_provider",
-                "provider_preference_id",
-                "updated_at",
+            order.payment_status = Order.PaymentStatus.PENDING
+            order.payment_provider = Order.PaymentProvider.MERCADO_PAGO
+            order.provider_preference_id = preference["id"]
+            order.provider_checkout_url = checkout_url
+            order.save(
+                update_fields=(
+                    "payment_status",
+                    "payment_provider",
+                    "provider_preference_id",
+                    "provider_checkout_url",
+                    "updated_at",
+                )
             )
-        )
-        return Response(
-            {
-                "preference_id": preference["id"],
-                "init_point": preference.get("init_point"),
-                "sandbox_init_point": preference.get("sandbox_init_point"),
-            },
-            status=status.HTTP_201_CREATED,
-        )
+            return Response(
+                {
+                    "preference_id": preference["id"],
+                    "checkout_url": checkout_url,
+                    "init_point": preference.get("init_point"),
+                    "sandbox_init_point": preference.get("sandbox_init_point"),
+                },
+                status=status.HTTP_201_CREATED,
+            )
 
 
 class MercadoPagoWebhookView(APIView):
@@ -313,6 +363,15 @@ class OrderStatusUpdateView(APIView):
             ):
                 return Response(
                     {"detail": "The order must be paid before processing."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if (
+                new_status == Order.Status.CANCELLED
+                and order.payment_status == Order.PaymentStatus.PAID
+            ):
+                return Response(
+                    {"detail": "Paid orders must be refunded before cancellation."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
