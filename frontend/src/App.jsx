@@ -57,6 +57,7 @@ const paymentStatusLabels = {
 
 function App() {
   const [products, setProducts] = useState([])
+  const [categories, setCategories] = useState([])
   const [cart, setCart] = useState(null)
   const [orders, setOrders] = useState([])
   const [token, setToken] = useState(() => localStorage.getItem(accessTokenKey) || '')
@@ -66,6 +67,8 @@ function App() {
   const [password, setPassword] = useState('')
   const [shippingAddress, setShippingAddress] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('card')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [selectedCategoryId, setSelectedCategoryId] = useState('')
   const [paymentOrder, setPaymentOrder] = useState(null)
   const [paymentOrderError, setPaymentOrderError] = useState('')
   const [ordersError, setOrdersError] = useState('')
@@ -94,8 +97,11 @@ function App() {
   }
 
   useEffect(() => {
-    api('/products/')
-      .then(setProducts)
+    Promise.all([api('/products/'), api('/categories/')])
+      .then(([productData, categoryData]) => {
+        setProducts(productData)
+        setCategories(categoryData)
+      })
       .catch((error) => setMessage(error.message))
   }, [])
 
@@ -308,6 +314,11 @@ function App() {
     (sum, item) => sum + Number(item.product.price) * item.quantity,
     0,
   )
+  const normalizedQuery = searchQuery.trim().toLocaleLowerCase('es-AR')
+  const visibleProducts = products.filter((product) => (
+    (!selectedCategoryId || product.category === Number(selectedCategoryId))
+    && (!normalizedQuery || `${product.name} ${product.description}`.toLocaleLowerCase('es-AR').includes(normalizedQuery))
+  ))
 
   if (window.location.pathname === '/payment-result') {
     const hasPaymentOrderId = Number.isInteger(paymentOrderId) && paymentOrderId > 0
@@ -391,8 +402,20 @@ function App() {
             <p className="eyebrow">CATÁLOGO</p>
             <h2 id="catalog-title">Productos disponibles</h2>
           </div>
+          <div className="catalog-controls">
+            <label className="search-field">
+              <span>Buscar productos</span>
+              <input type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Nombre o descripción" />
+            </label>
+            <div className="category-filters" aria-label="Filtrar por categoría">
+              <button className={!selectedCategoryId ? 'category-filter active' : 'category-filter'} type="button" onClick={() => setSelectedCategoryId('')}>Todo</button>
+              {categories.map((category) => (
+                <button className={selectedCategoryId === String(category.id) ? 'category-filter active' : 'category-filter'} type="button" key={category.id} onClick={() => setSelectedCategoryId(String(category.id))}>{category.name}</button>
+              ))}
+            </div>
+          </div>
           <div className="product-grid">
-            {products.map((product) => (
+            {visibleProducts.map((product) => (
               <article className="product-card" key={product.id}>
                 <div className="product-image">
                   {product.image ? <img src={product.image} alt={product.name} /> : product.name.slice(0, 1)}
@@ -400,14 +423,18 @@ function App() {
                 <h3>{product.name}</h3>
                 <p>{product.description || 'Producto seleccionado para tu compra.'}</p>
                 <div className="product-footer">
-                  <strong>{formatPrice(product.price)}</strong>
-                  <button className="button small" onClick={() => addToCart(product.id)} disabled={isLoading}>
-                    Agregar
+                  <div>
+                    <strong>{formatPrice(product.price)}</strong>
+                    <span className={product.is_available ? 'availability' : 'availability sold-out'}>{product.is_available ? 'Disponible' : 'Sin stock'}</span>
+                  </div>
+                  <button className="button small" onClick={() => addToCart(product.id)} disabled={isLoading || !product.is_available}>
+                    {product.is_available ? 'Agregar' : 'Sin stock'}
                   </button>
                 </div>
               </article>
             ))}
           </div>
+          {visibleProducts.length === 0 && <p className="empty-catalog">No encontramos productos con esos filtros.</p>}
           {token && (
             <section className="orders-section" aria-labelledby="orders-title">
               <div className="section-heading">

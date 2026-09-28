@@ -49,11 +49,28 @@ class ProductApiTests(APITestCase):
         self.assertEqual([product["id"] for product in response.data], [self.public_product.id])
         self.assertNotIn("stock", response.data[0])
         self.assertNotIn("is_active", response.data[0])
+        self.assertTrue(response.data[0]["is_available"])
 
     def test_public_catalog_hides_inactive_product_details(self):
         response = self.client.get(f"/api/products/{self.inactive_product.id}/")
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_public_catalog_reports_when_a_product_is_not_available(self):
+        sold_out_product = Product.objects.create(
+            name="Sold out product",
+            description="No stock remaining",
+            price="100.00",
+            stock=0,
+            category=self.active_category,
+        )
+
+        response = self.client.get("/api/products/")
+
+        product_data = next(
+            product for product in response.data if product["id"] == sold_out_product.id
+        )
+        self.assertFalse(product_data["is_available"])
 
     def test_public_catalog_only_exposes_active_categories_without_status(self):
         response = self.client.get("/api/categories/")

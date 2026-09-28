@@ -27,6 +27,12 @@ input, textarea, select { background: #fffdf7; border: 1px solid #c8c3b8; border
 .notice { background: #fae7bf; border-left: 4px solid #a94d23; color: #573112; margin: 22px 0 0; padding: 12px 16px; }
 .content { align-items: flex-start; gap: 40px; margin-top: 42px; }
 .catalog { flex: 1; min-width: 0; }
+.catalog-controls { border-bottom: 1px solid #d9d4ca; margin: -2px 0 24px; padding-bottom: 20px; }
+.search-field { color: #3b493e; display: block; font-size: .8rem; font-weight: 700; max-width: 360px; }
+.search-field input { display: block; margin-top: 6px; width: 100%; }
+.category-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.category-filter { background: transparent; border: 1px solid #b6c0b0; border-radius: 999px; color: #3b493e; cursor: pointer; font: inherit; font-size: .85rem; padding: 7px 12px; }
+.category-filter:hover, .category-filter.active { background: #26352b; border-color: #26352b; color: #fffdf7; }
 .product-grid { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(240px, 320px)); }
 .product-card { background: #fffdf7; border: 1px solid #d9d4ca; border-top: 3px solid #d9d4ca; display: flex; flex-direction: column; min-width: 0; padding: 14px; transition: border-color .2s ease, box-shadow .2s ease, transform .2s ease; }
 .product-card:hover { border-top-color: #a94d23; box-shadow: 0 12px 24px rgb(38 53 43 / 10%); transform: translateY(-3px); }
@@ -35,6 +41,9 @@ input, textarea, select { background: #fffdf7; border: 1px solid #c8c3b8; border
 .product-card h3 { font-size: 1.25rem; margin-bottom: 8px; }
 .product-card p, .muted { color: #62665f; font-size: .9rem; }
 .product-footer { align-items: center; justify-content: space-between; margin-top: auto; padding-top: 18px; }
+.availability { color: #35623d; display: block; font-size: .78rem; font-weight: 700; margin-top: 4px; }
+.availability.sold-out { color: #9b4430; }
+.empty-catalog { background: #fffdf7; border: 1px dashed #c8c3b8; color: #62665f; margin: 0; max-width: 660px; padding: 18px; }
 .orders-section { border-top: 1px solid #d9d4ca; margin-top: 48px; padding-top: 36px; }
 .orders-section h2 { margin-bottom: 16px; }
 .orders-list { display: grid; gap: 12px; max-width: 660px; }
@@ -69,4 +78,4 @@ input, textarea, select { background: #fffdf7; border: 1px solid #c8c3b8; border
 .order-card p { font-size: .9rem; margin: 8px 0 0; }
 .payment-result .button { display: inline-block; margin-top: 20px; text-decoration: none; }
 @media (max-width: 980px) { .topbar { align-items: flex-start; flex-direction: column; } .content { flex-direction: column; } .catalog, .checkout-panel { width: 100%; } .checkout-panel { min-width: 0; position: static; } }
-@media (max-width: 600px) { .storefront { padding: 24px 16px 48px; } .topbar { gap: 20px; padding-bottom: 22px; } h1 { font-size: clamp(2.35rem, 12vw, 3.4rem); } h2 { font-size: 1.7rem; } .auth-panel { margin-top: 22px; padding: 20px; } .auth-form, .login-form { grid-template-columns: 1fr; } .content { gap: 28px; margin-top: 30px; } .product-grid { grid-template-columns: 1fr; } .product-card { padding: 12px; } .orders-section { margin-top: 36px; padding-top: 28px; } .customer-order { padding: 16px; } .order-summary { align-items: flex-start; flex-direction: column; gap: 8px; } .order-statuses { align-items: flex-start; flex-direction: column; gap: 8px; } .checkout-panel { padding: 20px; } }
+@media (max-width: 600px) { .storefront { padding: 24px 16px 48px; } .topbar { gap: 20px; padding-bottom: 22px; } h1 { font-size: clamp(2.35rem, 12vw, 3.4rem); } h2 { font-size: 1.7rem; } .auth-panel { margin-top: 22px; padding: 20px; } .auth-form, .login-form { grid-template-columns: 1fr; } .content { gap: 28px; margin-top: 30px; } .catalog-controls { margin-bottom: 20px; } .search-field { max-width: none; } .product-grid { grid-template-columns: 1fr; } .product-card { padding: 12px; } .orders-section { margin-top: 36px; padding-top: 28px; } .customer-order { padding: 16px; } .order-summary { align-items: flex-start; flex-direction: column; gap: 8px; } .order-statuses { align-items: flex-start; flex-direction: column; gap: 8px; } .checkout-panel { padding: 20px; } }

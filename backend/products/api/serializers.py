@@ -4,6 +4,11 @@ from products.models import Category, Product
 
 
 class PublicProductSerializer(serializers.ModelSerializer):
+    is_available = serializers.SerializerMethodField()
+
+    def get_is_available(self, product):
+        return product.stock > 0
+
     class Meta:
         model = Product
         fields = [
@@ -13,6 +18,7 @@ class PublicProductSerializer(serializers.ModelSerializer):
             "price",
             "image",
             "category",
+            "is_available",
             "created_at",
             "updated_at",
         ]
