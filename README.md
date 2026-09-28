@@ -21,6 +21,12 @@ Produccion: `https://ecommerce-api-rysy.onrender.com`
 5. Mercado Pago notifica el resultado mediante un webhook validado por el backend.
 6. Solo un pago aprobado con referencia e importe coincidentes cambia el estado de pago a `paid`.
 
+### Pagos Rechazados Y Reservas Vencidas
+
+- Un webhook de Mercado Pago con estado `rejected` o `cancelled` cambia el pago a `failed`; el cliente ve el resultado y puede volver a la tienda para intentarlo nuevamente.
+- El stock queda reservado durante 30 minutos para pagos con tarjeta o transferencia. Si no se acredita un pago, `expire_payment_reservations` cancela el pedido pendiente y devuelve las unidades al stock.
+- Para validar este caso en sandbox, completar un checkout con un pago rechazado o cancelado y confirmar en `/admin/` que el pedido conserva estado `pending` y pago `failed`. Para comprobar la reposicion de stock sin esperar, se puede usar un pedido de prueba con una reserva vencida en un entorno local.
+
 ### Preparacion Y Entrega
 
 El pago se confirma automaticamente, pero la logistica se actualiza manualmente desde Django admin. Esto evita marcar un pedido como preparado o enviado sin que haya ocurrido fisicamente.

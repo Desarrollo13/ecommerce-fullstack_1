@@ -297,6 +297,24 @@ function App() {
     }
   }
 
+  async function retryPayment(orderId) {
+    setIsLoading(true)
+    setMessage('')
+    try {
+      const preference = await authenticatedApi(`/orders/${orderId}/payment-preference/`, {
+        method: 'POST',
+      })
+      const checkoutUrl = preference.checkout_url || preference.sandbox_init_point || preference.init_point
+      if (!checkoutUrl) throw new Error('Mercado Pago no devolvió una URL de pago.')
+      window.location.assign(checkoutUrl)
+    } catch (error) {
+      setMessage(error.message)
+      setPaymentOrderError(error.message)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   async function logout() {
     try {
       await api('/auth/logout/', { method: 'POST' })
@@ -323,11 +341,12 @@ function App() {
   if (window.location.pathname === '/payment-result') {
     const hasPaymentOrderId = Number.isInteger(paymentOrderId) && paymentOrderId > 0
     const paymentConfirmed = paymentOrder?.payment_status === 'paid'
+    const paymentFailed = paymentOrder?.payment_status === 'failed'
     return (
       <main className="payment-result">
         <p className="eyebrow">ESTADO DEL PAGO</p>
-        <h1>{paymentConfirmed ? 'Tu pago fue confirmado.' : 'Estamos verificando tu pago.'}</h1>
-        <p>{paymentConfirmed ? 'Recibimos tu pago y prepararemos tu pedido.' : 'Mercado Pago confirma el resultado mediante el webhook.'}</p>
+        <h1>{paymentConfirmed ? 'Tu pago fue confirmado.' : paymentFailed ? 'No se acreditó el pago.' : 'Estamos verificando tu pago.'}</h1>
+        <p>{paymentConfirmed ? 'Recibimos tu pago y prepararemos tu pedido.' : paymentFailed ? 'El pedido continúa reservado temporalmente. Podés volver a la tienda e intentar el pago nuevamente.' : 'Mercado Pago confirma el resultado mediante el webhook.'}</p>
         {!hasPaymentOrderId && <p className="notice">No encontramos el pedido asociado al pago.</p>}
         {!token && <p className="notice">Iniciá sesión en la tienda para consultar tu pedido.</p>}
         {token && hasPaymentOrderId && !paymentOrder && !paymentOrderError && <p className="muted">Cargando tu pedido...</p>}
@@ -335,10 +354,11 @@ function App() {
         {paymentOrder && (
           <article className="order-card">
             <div><span>Pedido #{paymentOrder.id}</span><strong>{formatPrice(paymentOrder.total)}</strong></div>
-            <p>Pago: <b>{paymentOrder.payment_status}</b> · Estado del pedido: <b>{paymentOrder.status}</b></p>
+            <p>Pago: <b>{paymentStatusLabels[paymentOrder.payment_status] || paymentOrder.payment_status}</b> · Estado del pedido: <b>{orderStatusLabels[paymentOrder.status] || paymentOrder.status}</b></p>
             {paymentOrder.payment_status === 'pending' && <p className="muted">Actualizamos este estado automáticamente.</p>}
           </article>
         )}
+        {paymentFailed && <button className="button" type="button" onClick={() => retryPayment(paymentOrder.id)} disabled={isLoading}>Reintentar pago</button>}
         <a className="button" href="/">Volver a la tienda</a>
       </main>
     )
@@ -462,6 +482,7 @@ function App() {
                         <li key={item.id}>{item.quantity} x {item.product_name}</li>
                       ))}
                     </ul>
+                    {order.payment_status === 'failed' && <button className="button small retry-payment" type="button" onClick={() => retryPayment(order.id)} disabled={isLoading}>Reintentar pago</button>}
                   </article>
                 ))}
               </div>

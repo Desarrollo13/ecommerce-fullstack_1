@@ -301,6 +301,45 @@ class OrderApiTests(APITestCase):
         self.assertEqual(order.payment_status, Order.PaymentStatus.PAID)
         self.assertEqual(order.provider_payment_id, "payment-123")
 
+    @override_settings(
+        MERCADOPAGO_ACCESS_TOKEN="TEST-access-token",
+        MERCADOPAGO_WEBHOOK_SECRET="webhook-secret",
+    )
+    @patch("orders.api.views.mercadopago.SDK")
+    def test_mercadopago_webhook_marks_a_rejected_payment_as_failed(self, mock_sdk):
+        order = self.create_order_with_item()
+        order.payment_provider = Order.PaymentProvider.MERCADO_PAGO
+        order.save(update_fields=("payment_provider",))
+        mock_sdk.return_value.payment.return_value.get.return_value = {
+            "status": 200,
+            "response": {
+                "external_reference": str(order.pk),
+                "transaction_amount": "200.00",
+                "status": "rejected",
+            },
+        }
+        timestamp = "1234567890"
+        request_id = "request-123"
+        manifest = f"id:payment-456;request-id:{request_id};ts:{timestamp};"
+        signature = hmac.new(
+            b"webhook-secret", manifest.encode(), hashlib.sha256
+        ).hexdigest()
+
+        response = self.client.post(
+            "/api/orders/payments/webhook/",
+            {"type": "payment", "data": {"id": "payment-456"}},
+            format="json",
+            headers={
+                "X-Signature": f"ts={timestamp},v1={signature}",
+                "X-Request-Id": request_id,
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        order.refresh_from_db()
+        self.assertEqual(order.payment_status, Order.PaymentStatus.FAILED)
+        self.assertEqual(order.provider_payment_id, "payment-456")
+
     @override_settings(MERCADOPAGO_ACCESS_TOKEN="TEST-access-token")
     @patch("orders.api.views.mercadopago.SDK")
     def test_legacy_payment_notification_marks_an_approved_payment_as_paid(self, mock_sdk):
