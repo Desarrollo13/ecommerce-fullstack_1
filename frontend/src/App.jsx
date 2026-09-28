@@ -33,9 +33,32 @@ function formatPrice(value) {
   }).format(value)
 }
 
+function formatDate(value) {
+  return new Intl.DateTimeFormat('es-AR', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(value))
+}
+
+const orderStatusLabels = {
+  pending: 'Pendiente',
+  processing: 'En preparación',
+  shipped: 'Enviado',
+  delivered: 'Entregado',
+  cancelled: 'Cancelado',
+}
+
+const paymentStatusLabels = {
+  pending: 'Pendiente',
+  paid: 'Acreditado',
+  failed: 'Rechazado',
+  refunded: 'Reembolsado',
+}
+
 function App() {
   const [products, setProducts] = useState([])
   const [cart, setCart] = useState(null)
+  const [orders, setOrders] = useState([])
   const [token, setToken] = useState(() => localStorage.getItem(accessTokenKey) || '')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -43,6 +66,7 @@ function App() {
   const [paymentMethod, setPaymentMethod] = useState('card')
   const [paymentOrder, setPaymentOrder] = useState(null)
   const [paymentOrderError, setPaymentOrderError] = useState('')
+  const [ordersError, setOrdersError] = useState('')
   const [message, setMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
 
@@ -61,6 +85,7 @@ function App() {
         localStorage.removeItem(accessTokenKey)
         setToken('')
         setCart(null)
+        setOrders([])
         throw refreshError
       }
     }
@@ -80,9 +105,24 @@ function App() {
     }
   })
 
+  const loadOrders = useEffectEvent(async () => {
+    try {
+      setOrders(await authenticatedApi('/orders/'))
+      setOrdersError('')
+    } catch (error) {
+      setOrdersError(error.message)
+    }
+  })
+
   useEffect(() => {
     if (!token) return
     const timerId = window.setTimeout(loadCart, 0)
+    return () => window.clearTimeout(timerId)
+  }, [token])
+
+  useEffect(() => {
+    if (!token) return
+    const timerId = window.setTimeout(loadOrders, 0)
     return () => window.clearTimeout(timerId)
   }, [token])
 
@@ -199,6 +239,7 @@ function App() {
 
       if (paymentMethod === 'cash_on_delivery') {
         setCart(await authenticatedApi('/cart/'))
+        setOrders((currentOrders) => [order, ...currentOrders])
         setMessage(`Pedido #${order.id} creado. Pagarás al recibirlo.`)
         return
       }
@@ -223,6 +264,7 @@ function App() {
       localStorage.removeItem(accessTokenKey)
       setToken('')
       setCart(null)
+      setOrders([])
       setMessage('Sesión cerrada.')
     }
   }
@@ -318,6 +360,38 @@ function App() {
               </article>
             ))}
           </div>
+          {token && (
+            <section className="orders-section" aria-labelledby="orders-title">
+              <div className="section-heading">
+                <p className="eyebrow">TU HISTORIAL</p>
+                <h2 id="orders-title">Mis pedidos</h2>
+              </div>
+              {ordersError && <p className="notice">{ordersError}</p>}
+              {!ordersError && orders.length === 0 && <p className="muted">Todavía no realizaste pedidos.</p>}
+              <div className="orders-list">
+                {orders.map((order) => (
+                  <article className="customer-order" key={order.id}>
+                    <div className="order-summary">
+                      <div>
+                        <span className="order-number">Pedido #{order.id}</span>
+                        <span className="order-date">{formatDate(order.created_at)}</span>
+                      </div>
+                      <strong>{formatPrice(order.total)}</strong>
+                    </div>
+                    <div className="order-statuses">
+                      <span className={`status status-${order.payment_status}`}>Pago: {paymentStatusLabels[order.payment_status] || order.payment_status}</span>
+                      <span className={`status status-${order.status}`}>Pedido: {orderStatusLabels[order.status] || order.status}</span>
+                    </div>
+                    <ul className="order-items">
+                      {order.items.map((item) => (
+                        <li key={item.id}>{item.quantity} x {item.product_name}</li>
+                      ))}
+                    </ul>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
         </section>
 
         <aside className="checkout-panel" aria-labelledby="checkout-title">
