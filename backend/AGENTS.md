@@ -6,9 +6,9 @@
 - Use `..\venv\Scripts\python.exe manage.py check` for a fast configuration check.
 - Before committing model changes, run `..\venv\Scripts\python.exe manage.py makemigrations --check --dry-run`; create migrations with `..\venv\Scripts\python.exe manage.py makemigrations <app>` and apply them with `..\venv\Scripts\python.exe manage.py migrate`.
 - Run the current app test target with `..\venv\Scripts\python.exe manage.py test users cart orders products`. Tests and database-backed commands require the local MySQL instance configured in `config/settings.py` (`ecommerce_db` on `localhost:3306`).
-- Dependencies are installed only in the sibling `venv/`; this repository has no requirements or lockfile.
+- Local dependencies are installed in the sibling `venv/`. Production dependencies are pinned in `backend/requirements.txt`; install them locally with `..\venv\Scripts\python.exe -m pip install -r requirements.txt`.
 - Run the React frontend from `frontend/` with `npm.cmd run dev`, `npm.cmd run lint`, and `npm.cmd run build`; use `npm.cmd` because PowerShell script execution is disabled on this machine.
-- Vite proxies `/api` to `http://127.0.0.1:8000` by default. Override that target with `VITE_API_TARGET` only when necessary.
+- Vite proxies `/api` to `http://127.0.0.1:8000` by default. Production builds use `/static/` as their asset base and Django serves the compiled frontend from the same origin.
 
 ## Structure And API Behavior
 
@@ -29,7 +29,10 @@
 
 ## Current Integration Status
 
-- `frontend/` is a React + Vite storefront with JWT login, public catalog, authenticated cart, checkout, and a `/payment-result` view that lists the user's actual orders.
-- The sandbox checkout and payment synchronization were tested successfully. Order `#7` was paid after manually sending its legacy payment notification; its payment ID is stored in the database.
-- Mercado Pago did not automatically deliver that sandbox notification to the current tunnel. Next session, log in to the Developers panel with the real Mercado Pago account that owns the `TEST-` access token, then inspect the application's Webhooks delivery history. Do not use the `TESTUSER...` buyer account for this configuration.
-- Test orders `#4`, `#5`, and `#6` were cancelled to restore stock. Checkout reserves stock immediately, so abandoned pending orders must be cancelled to release their reserved items.
+- The production service is live at `https://ecommerce-api-rysy.onrender.com`. It uses a fresh Neon PostgreSQL database. The initial administrator is created and updated on each deploy by `ensure_admin` from private Render environment variables; never commit those values.
+- Render uses `backend/` as its root directory. Its Build Command must compile `../frontend` before `collectstatic`; use the command in `backend/DEPLOYMENT.md`. The Start Command is `gunicorn config.wsgi:application --bind 0.0.0.0:$PORT`.
+- The React storefront is served by Django at `/`, and `/payment-result` serves the same SPA entrypoint. This keeps JWT refresh cookies, frontend, and `/api` on one origin. Vite production assets must retain the `/static/` base configured in `frontend/vite.config.js`.
+- `FRONTEND_URL` should be `https://ecommerce-api-rysy.onrender.com`. Set `DJANGO_ALLOWED_HOSTS` to `ecommerce-api-rysy.onrender.com` and `MERCADOPAGO_WEBHOOK_URL` to `https://ecommerce-api-rysy.onrender.com/api/orders/payments/webhook/` in Render.
+- The fresh production catalog currently has one Smart TV product. Its API currently reports `"image": null`, so the storefront displays its initial. Do not rely on Render's ephemeral filesystem for uploads; next task is integrate a persistent image provider such as Cloudinary before adding product images.
+- Mercado Pago generated and redirected to the sandbox checkout, so preference creation works. The sandbox login then failed in Firefox. Retry in an incognito window without VPN using a `TESTUSER...` buyer account. The real account that owns the `TEST-` token is only for application and webhook configuration.
+- Payment reservations expire after 30 minutes. `python manage.py expire_payment_reservations` cancels expired online reservations and restores stock; schedule it externally in a non-free production environment. Paid orders cannot be cancelled without a prior refund.
