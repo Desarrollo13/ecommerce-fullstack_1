@@ -23,6 +23,11 @@ from orders.api.serializers import (
     PaymentStatusSerializer,
 )
 from orders.models import Order, OrderItem
+from orders.notifications import (
+    send_order_delivered_email,
+    send_order_shipped_email,
+    send_payment_confirmed_email,
+)
 from orders.services import PAYMENT_RESERVATION_MINUTES, expire_payment_reservations
 from products.models import Product
 
@@ -334,10 +339,18 @@ class MercadoPagoWebhookView(APIView):
             if new_status != order.payment_status and not order.can_transition_payment_to(new_status):
                 return Response(status=status.HTTP_204_NO_CONTENT)
 
+            payment_confirmed_order = (
+                order
+                if new_status == Order.PaymentStatus.PAID
+                and order.payment_status != Order.PaymentStatus.PAID
+                else None
+            )
             order.payment_status = new_status
             order.provider_payment_id = data_id
             order.save(update_fields=("payment_status", "provider_payment_id", "updated_at"))
 
+        if payment_confirmed_order is not None:
+            send_payment_confirmed_email(payment_confirmed_order)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -349,6 +362,7 @@ class OrderStatusUpdateView(APIView):
         serializer.is_valid(raise_exception=True)
         new_status = serializer.validated_data["status"]
 
+        notification = None
         with transaction.atomic():
             order = get_object_or_404(Order.objects.select_for_update(), pk=pk)
             if not order.can_transition_to(new_status):
@@ -391,7 +405,13 @@ class OrderStatusUpdateView(APIView):
 
             order.status = new_status
             order.save(update_fields=("status", "updated_at"))
+            if new_status == Order.Status.SHIPPED:
+                notification = send_order_shipped_email
+            elif new_status == Order.Status.DELIVERED:
+                notification = send_order_delivered_email
 
+        if notification is not None:
+            notification(order)
         return Response(OrderSerializer(order).data)
 
 
@@ -403,6 +423,7 @@ class PaymentStatusUpdateView(APIView):
         serializer.is_valid(raise_exception=True)
         new_status = serializer.validated_data["payment_status"]
 
+        notification = None
         with transaction.atomic():
             order = get_object_or_404(Order.objects.select_for_update(), pk=pk)
             if not order.can_transition_payment_to(new_status):
@@ -413,5 +434,9 @@ class PaymentStatusUpdateView(APIView):
 
             order.payment_status = new_status
             order.save(update_fields=("payment_status", "updated_at"))
+            if new_status == Order.PaymentStatus.PAID:
+                notification = send_payment_confirmed_email
 
+        if notification is not None:
+            notification(order)
         return Response(OrderSerializer(order).data)

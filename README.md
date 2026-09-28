@@ -45,6 +45,10 @@ pending -> processing -> shipped -> delivered
 
 Los administradores deben cambiar estos estados desde `/admin/`. El sistema solo permite pasar a `processing` si el pago figura como `paid`.
 
+### Notificaciones Por Email
+
+El sistema notifica al cliente cuando crea su cuenta, se acredita un pago y el pedido es despachado o entregado. Para entregarlas en produccion se debe configurar un proveedor SMTP mediante las variables documentadas en `backend/.env.example` y `backend/DEPLOYMENT.md`. Si `EMAIL_HOST` no esta configurado, los emails solo se imprimen en los logs locales o de Render.
+
 ## Ejecucion Local
 
 Backend, desde `backend/`:

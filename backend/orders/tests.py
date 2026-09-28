@@ -266,8 +266,11 @@ class OrderApiTests(APITestCase):
         MERCADOPAGO_ACCESS_TOKEN="TEST-access-token",
         MERCADOPAGO_WEBHOOK_SECRET="webhook-secret",
     )
+    @patch("orders.api.views.send_payment_confirmed_email")
     @patch("orders.api.views.mercadopago.SDK")
-    def test_mercadopago_webhook_marks_an_approved_payment_as_paid(self, mock_sdk):
+    def test_mercadopago_webhook_marks_an_approved_payment_as_paid(
+        self, mock_sdk, mock_send_payment_confirmed_email
+    ):
         order = self.create_order_with_item()
         order.payment_provider = Order.PaymentProvider.MERCADO_PAGO
         order.save(update_fields=("payment_provider",))
@@ -300,6 +303,7 @@ class OrderApiTests(APITestCase):
         order.refresh_from_db()
         self.assertEqual(order.payment_status, Order.PaymentStatus.PAID)
         self.assertEqual(order.provider_payment_id, "payment-123")
+        mock_send_payment_confirmed_email.assert_called_once_with(order)
 
     @override_settings(
         MERCADOPAGO_ACCESS_TOKEN="TEST-access-token",
@@ -463,7 +467,10 @@ class OrderApiTests(APITestCase):
         )
         return order
 
-    def test_staff_can_progress_an_order_through_valid_statuses(self):
+    @patch("orders.api.views.send_payment_confirmed_email")
+    def test_staff_can_progress_an_order_through_valid_statuses(
+        self, mock_send_payment_confirmed_email
+    ):
         order = self.create_order_with_item()
         self.client.force_authenticate(self.staff)
 
@@ -478,6 +485,7 @@ class OrderApiTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["payment_status"], Order.PaymentStatus.PAID)
+        mock_send_payment_confirmed_email.assert_called_once_with(order)
 
         for new_status in (
             Order.Status.PROCESSING,
@@ -489,6 +497,29 @@ class OrderApiTests(APITestCase):
             )
             self.assertEqual(response.status_code, status.HTTP_200_OK)
             self.assertEqual(response.data["status"], new_status)
+
+    @patch("orders.api.views.send_order_delivered_email")
+    @patch("orders.api.views.send_order_shipped_email")
+    def test_status_updates_send_shipping_and_delivery_emails(
+        self, mock_send_order_shipped_email, mock_send_order_delivered_email
+    ):
+        order = self.create_order_with_item()
+        order.payment_status = Order.PaymentStatus.PAID
+        order.save(update_fields=("payment_status",))
+        self.client.force_authenticate(self.staff)
+
+        self.client.patch(
+            f"/api/orders/{order.pk}/status/", {"status": Order.Status.PROCESSING}
+        )
+        self.client.patch(
+            f"/api/orders/{order.pk}/status/", {"status": Order.Status.SHIPPED}
+        )
+        self.client.patch(
+            f"/api/orders/{order.pk}/status/", {"status": Order.Status.DELIVERED}
+        )
+
+        mock_send_order_shipped_email.assert_called_once_with(order)
+        mock_send_order_delivered_email.assert_called_once_with(order)
 
     def test_status_update_requires_staff(self):
         order = self.create_order_with_item()

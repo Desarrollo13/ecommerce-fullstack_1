@@ -8,7 +8,10 @@ from unittest.mock import patch
 
 
 class UserModelTests(TestCase):
-    def test_registration_creates_a_customer_without_returning_password(self):
+    @patch("users.api.views.send_welcome_email")
+    def test_registration_creates_a_customer_without_returning_password(
+        self, mock_send_welcome_email
+    ):
         response = self.client.post(
             "/api/auth/register/",
             {
@@ -26,6 +29,7 @@ class UserModelTests(TestCase):
         user = get_user_model().objects.get(email="ana@example.com")
         self.assertTrue(user.check_password("secure-password"))
         self.assertEqual(user.role, get_user_model().Role.CUSTOMER)
+        mock_send_welcome_email.assert_called_once_with(user)
 
     def test_registration_rejects_duplicate_email(self):
         get_user_model().objects.create_user(

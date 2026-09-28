@@ -14,6 +14,7 @@ Set these private environment variables in Render:
 - `DJANGO_ADMIN_EMAIL`, `DJANGO_ADMIN_PASSWORD`, and optionally `DJANGO_ADMIN_USERNAME`.
 - `MERCADOPAGO_ACCESS_TOKEN`, `MERCADOPAGO_WEBHOOK_SECRET`, and `MERCADOPAGO_WEBHOOK_URL`.
 - `FRONTEND_URL`: the public HTTPS Render URL.
+- `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `EMAIL_USE_TLS`, and `DEFAULT_FROM_EMAIL` to deliver notifications through an SMTP provider. Without `EMAIL_HOST`, Django only writes emails to Render logs.
 
 `ensure_admin` runs on every deployment. It creates the administrator on the first deployment and keeps its password and staff privileges synchronized with the configured environment variables.
 

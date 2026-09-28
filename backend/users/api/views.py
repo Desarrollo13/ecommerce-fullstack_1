@@ -5,11 +5,16 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from users.api.serializers import RegisterSerializer
+from users.notifications import send_welcome_email
 
 
 class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
     permission_classes = [AllowAny]
+
+    def perform_create(self, serializer):
+        user = serializer.save()
+        send_welcome_email(user)
 
 
 def set_refresh_cookie(response, refresh_token):
