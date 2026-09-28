@@ -60,6 +60,8 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "cloudinary_storage",
+    "cloudinary",
     'rest_framework',
     'users',
     'cart',
@@ -188,6 +190,9 @@ STATICFILES_DIRS = [FRONTEND_BUILD_DIR] if FRONTEND_BUILD_DIR.exists() else []
 STORAGES = {
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+    "default": {
+        "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
     },
 }
 

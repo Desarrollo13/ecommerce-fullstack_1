@@ -235,11 +235,12 @@ function App() {
 
   if (window.location.pathname === '/payment-result') {
     const hasPaymentOrderId = Number.isInteger(paymentOrderId) && paymentOrderId > 0
+    const paymentConfirmed = paymentOrder?.payment_status === 'paid'
     return (
       <main className="payment-result">
         <p className="eyebrow">ESTADO DEL PAGO</p>
-        <h1>Estamos verificando tu pago.</h1>
-        <p>Mercado Pago confirma el resultado mediante el webhook.</p>
+        <h1>{paymentConfirmed ? 'Tu pago fue confirmado.' : 'Estamos verificando tu pago.'}</h1>
+        <p>{paymentConfirmed ? 'Recibimos tu pago y prepararemos tu pedido.' : 'Mercado Pago confirma el resultado mediante el webhook.'}</p>
         {!hasPaymentOrderId && <p className="notice">No encontramos el pedido asociado al pago.</p>}
         {!token && <p className="notice">Iniciá sesión en la tienda para consultar tu pedido.</p>}
         {token && hasPaymentOrderId && !paymentOrder && !paymentOrderError && <p className="muted">Cargando tu pedido...</p>}
@@ -247,7 +248,7 @@ function App() {
         {paymentOrder && (
           <article className="order-card">
             <div><span>Pedido #{paymentOrder.id}</span><strong>{formatPrice(paymentOrder.total)}</strong></div>
-            <p>Pago: <b>{paymentOrder.payment_status}</b> · Pedido: <b>{paymentOrder.status}</b></p>
+            <p>Pago: <b>{paymentOrder.payment_status}</b> · Estado del pedido: <b>{paymentOrder.status}</b></p>
             {paymentOrder.payment_status === 'pending' && <p className="muted">Actualizamos este estado automáticamente.</p>}
           </article>
         )}
