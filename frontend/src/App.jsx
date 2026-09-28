@@ -60,6 +60,8 @@ function App() {
   const [cart, setCart] = useState(null)
   const [orders, setOrders] = useState([])
   const [token, setToken] = useState(() => localStorage.getItem(accessTokenKey) || '')
+  const [authMode, setAuthMode] = useState('')
+  const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [shippingAddress, setShippingAddress] = useState('')
@@ -167,11 +169,43 @@ function App() {
       localStorage.setItem(accessTokenKey, session.access)
       setToken(session.access)
       setPassword('')
+      setAuthMode('')
     } catch (error) {
       setMessage(error.message)
     } finally {
       setIsLoading(false)
     }
+  }
+
+  async function register(event) {
+    event.preventDefault()
+    setIsLoading(true)
+    setMessage('')
+    try {
+      await api('/auth/register/', {
+        method: 'POST',
+        body: JSON.stringify({ username, email, password }),
+      })
+      const session = await api('/auth/token/', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      })
+      localStorage.setItem(accessTokenKey, session.access)
+      setToken(session.access)
+      setUsername('')
+      setPassword('')
+      setAuthMode('')
+      setMessage('Tu cuenta fue creada. Ya podés armar tu pedido.')
+    } catch (error) {
+      setMessage(error.message)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  function openAuth(mode) {
+    setMessage('')
+    setAuthMode(mode)
   }
 
   async function addToCart(productId) {
@@ -315,25 +349,39 @@ function App() {
             Cerrar sesión
           </button>
         ) : (
-          <form className="login" onSubmit={login}>
-            <input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="Email"
-              required
-            />
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="Contraseña"
-              required
-            />
-            <button className="button" disabled={isLoading}>Ingresar</button>
-          </form>
+          <div className="auth-actions">
+            <button className="button secondary" type="button" onClick={() => openAuth('register')}>Crear cuenta</button>
+            <button className="button" type="button" onClick={() => openAuth('login')}>Ingresar</button>
+          </div>
         )}
       </header>
+
+      {!token && authMode && (
+        <section className="auth-panel" aria-labelledby="auth-title">
+          <div className="auth-heading">
+            <div>
+              <p className="eyebrow">{authMode === 'register' ? 'NUEVA CUENTA' : 'BIENVENIDO/A'}</p>
+              <h2 id="auth-title">{authMode === 'register' ? 'Creá tu cuenta' : 'Ingresá a tu cuenta'}</h2>
+            </div>
+            <button className="close-button" type="button" onClick={() => setAuthMode('')} aria-label="Cerrar formulario">×</button>
+          </div>
+          {authMode === 'register' ? (
+            <form className="auth-form" onSubmit={register}>
+              <label>Nombre de usuario<input value={username} onChange={(event) => setUsername(event.target.value)} required /></label>
+              <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
+              <label>Contraseña<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength="8" required /></label>
+              <button className="button" disabled={isLoading}>{isLoading ? 'Creando cuenta...' : 'Crear cuenta'}</button>
+            </form>
+          ) : (
+            <form className="auth-form login-form" onSubmit={login}>
+              <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
+              <label>Contraseña<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
+              <button className="button" disabled={isLoading}>{isLoading ? 'Ingresando...' : 'Ingresar'}</button>
+            </form>
+          )}
+          <p className="auth-switch">{authMode === 'register' ? '¿Ya tenés una cuenta?' : '¿Todavía no tenés cuenta?'} <button type="button" onClick={() => openAuth(authMode === 'register' ? 'login' : 'register')}>{authMode === 'register' ? 'Ingresar' : 'Crear cuenta'}</button></p>
+        </section>
+      )}
 
       {message && <p className="notice" role="status">{message}</p>}
 
