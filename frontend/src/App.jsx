@@ -55,6 +55,16 @@ const paymentStatusLabels = {
   refunded: 'Reembolsado',
 }
 
+function CartIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M3 4h2l2.1 10.1a2 2 0 0 0 2 1.6h7.8a2 2 0 0 0 1.9-1.4L20 8H7" />
+      <circle cx="10" cy="20" r="1" />
+      <circle cx="17" cy="20" r="1" />
+    </svg>
+  )
+}
+
 function App() {
   const [products, setProducts] = useState([])
   const [categories, setCategories] = useState([])
@@ -328,6 +338,7 @@ function App() {
   }
 
   const items = cart?.items || []
+  const cartItemCount = items.reduce((count, item) => count + item.quantity, 0)
   const total = items.reduce(
     (sum, item) => sum + Number(item.product.price) * item.quantity,
     0,
@@ -368,23 +379,30 @@ function App() {
     <main className="storefront">
       <header className="topbar">
         <div>
-          <p className="eyebrow">TIENDA ONLINE</p>
-          <h1>Mercado local, compra simple.</h1>
+          <p className="eyebrow">MERCADO LOCAL</p>
+          <h1>Tienda Online</h1>
         </div>
-        {token ? (
-          <button
-            className="button secondary"
-            type="button"
-            onClick={logout}
-          >
-            Cerrar sesión
-          </button>
-        ) : (
-          <div className="auth-actions">
-            <button className="button secondary" type="button" onClick={() => openAuth('register')}>Crear cuenta</button>
-            <button className="button" type="button" onClick={() => openAuth('login')}>Ingresar</button>
-          </div>
-        )}
+        <div className="topbar-actions">
+          <a className="cart-shortcut" href="#carrito" aria-label={`Carrito con ${cartItemCount} producto${cartItemCount === 1 ? '' : 's'}`}>
+            <CartIcon />
+            <span>Carrito</span>
+            <b>{cartItemCount}</b>
+          </a>
+          {token ? (
+            <button
+              className="button secondary"
+              type="button"
+              onClick={logout}
+            >
+              Cerrar sesión
+            </button>
+          ) : (
+            <div className="auth-actions">
+              <button className="button secondary" type="button" onClick={() => openAuth('register')}>Crear cuenta</button>
+              <button className="button" type="button" onClick={() => openAuth('login')}>Ingresar</button>
+            </div>
+          )}
+        </div>
       </header>
 
       {!token && authMode && (
@@ -490,9 +508,12 @@ function App() {
           )}
         </section>
 
-        <aside className="checkout-panel" aria-labelledby="checkout-title">
+        <aside className="checkout-panel" id="carrito" aria-labelledby="checkout-title">
           <p className="eyebrow">TU COMPRA</p>
-          <h2 id="checkout-title">Carrito</h2>
+          <div className="cart-title">
+            <CartIcon />
+            <h2 id="checkout-title">Carrito</h2>
+          </div>
           {!token && <p className="muted">Iniciá sesión para armar tu pedido.</p>}
           {token && items.length === 0 && <p className="muted">Tu carrito está vacío.</p>}
           {items.map((item) => (

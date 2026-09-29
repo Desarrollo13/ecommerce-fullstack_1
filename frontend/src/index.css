@@ -1,4 +1,5 @@
-:root { background: #f4f0e8; color: #26352b; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-synthesis: none; text-rendering: optimizeLegibility; }
+:root { background: #f5f7f3; color: #18251e; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-synthesis: none; text-rendering: optimizeLegibility; }
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; }
+html { scroll-behavior: smooth; }
+body { background: radial-gradient(circle at top left, #e2eee6 0, transparent 32rem), linear-gradient(135deg, #f8faf7 0%, #f1f4ee 100%); margin: 0; min-width: 320px; }
 button, input, select, textarea { font: inherit; }
