@@ -20,3 +20,18 @@ def send_welcome_email(user):
         )
     except Exception:
         logger.exception("No se pudo enviar el email de bienvenida")
+
+
+def send_password_reset_email(user, reset_url):
+    try:
+        send_mail(
+            "Restablecé tu contraseña",
+            "Recibimos una solicitud para restablecer tu contraseña. "
+            f"Usá este enlace para elegir una nueva contraseña: {reset_url}\n\n"
+            "Si no solicitaste este cambio, podés ignorar este mensaje.",
+            settings.DEFAULT_FROM_EMAIL,
+            [user.email],
+            fail_silently=False,
+        )
+    except Exception:
+        logger.exception("No se pudo enviar el email de restablecimiento de contraseña")

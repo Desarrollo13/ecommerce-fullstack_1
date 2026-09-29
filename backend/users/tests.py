@@ -1,9 +1,14 @@
 import os
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.tokens import default_token_generator
+from django.core import mail
 from django.core.management import call_command
 from django.db import IntegrityError
 from django.test import TestCase
+from django.test import override_settings
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
 from unittest.mock import patch
 
 
@@ -123,6 +128,41 @@ class UserModelTests(TestCase):
         self.assertEqual(self.client.get("/api/schema/").status_code, 200)
         self.assertEqual(self.client.get("/api/docs/").status_code, 200)
         self.assertEqual(self.client.get("/api/redoc/").status_code, 200)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend", FRONTEND_URL="https://store.example")
+    def test_password_reset_sends_a_one_time_link_and_updates_the_password(self):
+        user = get_user_model().objects.create_user(
+            username="ana", email="ana@example.com", password="old-password"
+        )
+
+        response = self.client.post("/api/auth/password-reset/", {"email": user.email})
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(len(mail.outbox), 1)
+        uid = urlsafe_base64_encode(force_bytes(user.pk))
+        token = default_token_generator.make_token(user)
+        self.assertIn(f"https://store.example/password-reset?uid={uid}&token=", mail.outbox[0].body)
+
+        response = self.client.post(
+            "/api/auth/password-reset/confirm/",
+            {"uid": uid, "token": token, "password": "new-secure-password"},
+        )
+
+        self.assertEqual(response.status_code, 204)
+        user.refresh_from_db()
+        self.assertTrue(user.check_password("new-secure-password"))
+        reused_response = self.client.post(
+            "/api/auth/password-reset/confirm/",
+            {"uid": uid, "token": token, "password": "another-password"},
+        )
+        self.assertEqual(reused_response.status_code, 400)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_password_reset_does_not_disclose_unknown_emails(self):
+        response = self.client.post("/api/auth/password-reset/", {"email": "missing@example.com"})
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(len(mail.outbox), 0)
 
     def test_ensure_admin_creates_and_updates_the_configured_user(self):
         with patch.dict(

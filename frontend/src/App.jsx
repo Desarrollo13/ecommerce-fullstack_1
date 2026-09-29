@@ -83,6 +83,7 @@ function App() {
   const [paymentOrderError, setPaymentOrderError] = useState('')
   const [ordersError, setOrdersError] = useState('')
   const [imagePreview, setImagePreview] = useState(null)
+  const [passwordResetComplete, setPasswordResetComplete] = useState(false)
   const [message, setMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
 
@@ -213,6 +214,45 @@ function App() {
       setPassword('')
       setAuthMode('')
       setMessage('Tu cuenta fue creada. Ya podés armar tu pedido.')
+    } catch (error) {
+      setMessage(error.message)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function requestPasswordReset(event) {
+    event.preventDefault()
+    setIsLoading(true)
+    setMessage('')
+    try {
+      await api('/auth/password-reset/', {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+      })
+      setAuthMode('')
+      setMessage('Si existe una cuenta con ese email, te enviamos un enlace para restablecer la contraseña.')
+    } catch (error) {
+      setMessage(error.message)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function confirmPasswordReset(event) {
+    event.preventDefault()
+    setIsLoading(true)
+    try {
+      await api('/auth/password-reset/confirm/', {
+        method: 'POST',
+        body: JSON.stringify({
+          uid: new URLSearchParams(window.location.search).get('uid'),
+          token: new URLSearchParams(window.location.search).get('token'),
+          password,
+        }),
+      })
+      setPassword('')
+      setPasswordResetComplete(true)
     } catch (error) {
       setMessage(error.message)
     } finally {
@@ -376,6 +416,28 @@ function App() {
     )
   }
 
+  if (window.location.pathname === '/password-reset') {
+    const resetParams = new URLSearchParams(window.location.search)
+    const hasResetLink = resetParams.has('uid') && resetParams.has('token')
+    return (
+      <main className="payment-result password-reset-page">
+        <p className="eyebrow">RECUPERAR CONTRASEÑA</p>
+        <h1>{passwordResetComplete ? 'Tu contraseña fue actualizada.' : 'Elegí una nueva contraseña'}</h1>
+        {passwordResetComplete ? (
+          <a className="button" href="/">Ir a la tienda</a>
+        ) : !hasResetLink ? (
+          <p className="notice">El enlace de restablecimiento no es válido.</p>
+        ) : (
+          <form className="reset-password-form" onSubmit={confirmPasswordReset}>
+            <label>Nueva contraseña<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength="8" required /></label>
+            {message && <p className="notice" role="status">{message}</p>}
+            <button className="button" disabled={isLoading}>{isLoading ? 'Actualizando...' : 'Actualizar contraseña'}</button>
+          </form>
+        )}
+      </main>
+    )
+  }
+
   return (
     <main className="storefront">
       <header className="topbar">
@@ -410,8 +472,8 @@ function App() {
         <section className="auth-panel" aria-labelledby="auth-title">
           <div className="auth-heading">
             <div>
-              <p className="eyebrow">{authMode === 'register' ? 'NUEVA CUENTA' : 'BIENVENIDO/A'}</p>
-              <h2 id="auth-title">{authMode === 'register' ? 'Creá tu cuenta' : 'Ingresá a tu cuenta'}</h2>
+              <p className="eyebrow">{authMode === 'register' ? 'NUEVA CUENTA' : authMode === 'reset' ? 'RECUPERAR ACCESO' : 'BIENVENIDO/A'}</p>
+              <h2 id="auth-title">{authMode === 'register' ? 'Creá tu cuenta' : authMode === 'reset' ? 'Restablecé tu contraseña' : 'Ingresá a tu cuenta'}</h2>
             </div>
             <button className="close-button" type="button" onClick={() => setAuthMode('')} aria-label="Cerrar formulario">×</button>
           </div>
@@ -422,6 +484,11 @@ function App() {
               <label>Contraseña<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength="8" required /></label>
               <button className="button" disabled={isLoading}>{isLoading ? 'Creando cuenta...' : 'Crear cuenta'}</button>
             </form>
+          ) : authMode === 'reset' ? (
+            <form className="auth-form login-form" onSubmit={requestPasswordReset}>
+              <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
+              <button className="button" disabled={isLoading}>{isLoading ? 'Enviando...' : 'Enviar enlace'}</button>
+            </form>
           ) : (
             <form className="auth-form login-form" onSubmit={login}>
               <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
@@ -429,7 +496,8 @@ function App() {
               <button className="button" disabled={isLoading}>{isLoading ? 'Ingresando...' : 'Ingresar'}</button>
             </form>
           )}
-          <p className="auth-switch">{authMode === 'register' ? '¿Ya tenés una cuenta?' : '¿Todavía no tenés cuenta?'} <button type="button" onClick={() => openAuth(authMode === 'register' ? 'login' : 'register')}>{authMode === 'register' ? 'Ingresar' : 'Crear cuenta'}</button></p>
+          {authMode === 'login' && <p className="auth-switch"><button type="button" onClick={() => openAuth('reset')}>¿Olvidaste tu contraseña?</button></p>}
+          {authMode !== 'reset' && <p className="auth-switch">{authMode === 'register' ? '¿Ya tenés una cuenta?' : '¿Todavía no tenés cuenta?'} <button type="button" onClick={() => openAuth(authMode === 'register' ? 'login' : 'register')}>{authMode === 'register' ? 'Ingresar' : 'Crear cuenta'}</button></p>}
         </section>
       )}
 

@@ -5,6 +5,8 @@ from users.api.views import (
     SessionLoginView,
     SessionLogoutView,
     SessionRefreshView,
+    PasswordResetConfirmView,
+    PasswordResetRequestView,
 )
 
 
@@ -13,4 +15,6 @@ urlpatterns = [
     path("token/", SessionLoginView.as_view(), name="token-obtain-pair"),
     path("token/refresh/", SessionRefreshView.as_view(), name="token-refresh"),
     path("logout/", SessionLogoutView.as_view(), name="logout"),
+    path("password-reset/", PasswordResetRequestView.as_view(), name="password-reset"),
+    path("password-reset/confirm/", PasswordResetConfirmView.as_view(), name="password-reset-confirm"),
 ]

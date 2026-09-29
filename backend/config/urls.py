@@ -14,4 +14,5 @@ urlpatterns = [
     path("api/redoc/", SpectacularRedocView.as_view(url_name="schema"), name="redoc"),
     path("", TemplateView.as_view(template_name="index.html")),
     path("payment-result", TemplateView.as_view(template_name="index.html")),
+    path("password-reset", TemplateView.as_view(template_name="index.html")),
 ]

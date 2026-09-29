@@ -94,6 +94,9 @@ input, textarea, select { background: #fffdf7; border: 1px solid #c8c3b8; border
 .order-card div { display: flex; justify-content: space-between; }
 .order-card p { font-size: .9rem; margin: 8px 0 0; }
 .payment-result .button { display: inline-block; margin: 20px 10px 0 0; text-decoration: none; }
+.reset-password-form { display: grid; gap: 16px; max-width: 420px; }
+.reset-password-form label { color: #3b493e; font-size: .88rem; font-weight: 700; }
+.reset-password-form input { display: block; margin-top: 6px; width: 100%; }
 .retry-payment { margin-top: 14px; }
 .image-preview-backdrop { align-items: center; background: rgb(15 28 20 / 62%); display: flex; inset: 0; justify-content: center; padding: 24px; position: fixed; z-index: 10; }
 .image-preview { background: #f9fbf7; border-radius: 16px; box-shadow: 0 24px 60px rgb(0 0 0 / 28%); max-width: 720px; padding: 18px; position: relative; width: min(100%, 720px); }
