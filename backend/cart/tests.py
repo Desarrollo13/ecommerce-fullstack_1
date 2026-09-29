@@ -89,3 +89,20 @@ class CartApiTests(APITestCase):
 
         self.assertEqual(first_cart.pk, second_cart.pk)
         self.assertEqual(Cart.objects.filter(user=self.user).count(), 1)
+
+    def test_user_cannot_change_or_remove_another_users_cart_item(self):
+        other_user = get_user_model().objects.create_user(
+            username="bea", email="bea@example.com", password="secure-password"
+        )
+        other_cart = Cart.objects.create(user=other_user)
+        item = CartItem.objects.create(cart=other_cart, product=self.product, quantity=1)
+        self.client.force_authenticate(self.user)
+
+        update_response = self.client.patch(
+            f"/api/cart/items/{item.pk}/", {"quantity": 2}
+        )
+        delete_response = self.client.delete(f"/api/cart/items/{item.pk}/")
+
+        self.assertEqual(update_response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(delete_response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertTrue(CartItem.objects.filter(pk=item.pk).exists())

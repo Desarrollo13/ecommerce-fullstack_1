@@ -119,6 +119,11 @@ class UserModelTests(TestCase):
         self.assertEqual(response.status_code, 204)
         self.assertEqual(response.cookies["ecommerce-refresh-token"]["max-age"], 0)
 
+    def test_openapi_documentation_is_public(self):
+        self.assertEqual(self.client.get("/api/schema/").status_code, 200)
+        self.assertEqual(self.client.get("/api/docs/").status_code, 200)
+        self.assertEqual(self.client.get("/api/redoc/").status_code, 200)
+
     def test_ensure_admin_creates_and_updates_the_configured_user(self):
         with patch.dict(
             os.environ,

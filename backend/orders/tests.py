@@ -4,7 +4,7 @@ from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
-from django.test import override_settings
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from cart.models import Cart, CartItem
 from orders.models import Order, OrderItem
+from orders.services import expire_payment_reservations
 from products.models import Category, Product
 
 
@@ -101,6 +102,17 @@ class OrderApiTests(APITestCase):
         response = self.client.get(f"/api/orders/{order.pk}/")
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_order_list_only_returns_the_authenticated_users_orders(self):
+        own_order = Order.objects.create(user=self.user, total="100.00")
+        other_order = Order.objects.create(user=self.other_user, total="200.00")
+        self.client.force_authenticate(self.user)
+
+        response = self.client.get("/api/orders/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual([order["id"] for order in response.data], [own_order.id])
+        self.assertNotIn(other_order.id, [order["id"] for order in response.data])
 
     @override_settings(
         MERCADOPAGO_ACCESS_TOKEN="TEST-access-token",
@@ -436,6 +448,36 @@ class OrderApiTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
 
+    @override_settings(MERCADOPAGO_ACCESS_TOKEN="TEST-access-token")
+    @patch("orders.api.views.send_payment_confirmed_email")
+    @patch("orders.api.views.mercadopago.SDK")
+    def test_mercadopago_webhook_ignores_payments_with_an_incorrect_amount(
+        self, mock_sdk, mock_send_payment_confirmed_email
+    ):
+        order = self.create_order_with_item()
+        order.payment_provider = Order.PaymentProvider.MERCADO_PAGO
+        order.save(update_fields=("payment_provider",))
+        mock_sdk.return_value.payment.return_value.get.return_value = {
+            "status": 200,
+            "response": {
+                "external_reference": str(order.pk),
+                "transaction_amount": "199.99",
+                "status": "approved",
+            },
+        }
+
+        response = self.client.post(
+            "/api/orders/payments/webhook/?id=payment-incorrect&topic=payment",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        order.refresh_from_db()
+        self.assertEqual(order.payment_status, Order.PaymentStatus.PENDING)
+        self.assertEqual(order.provider_payment_id, "")
+        mock_send_payment_confirmed_email.assert_not_called()
+
     def test_database_rejects_invalid_order_amounts_and_quantities(self):
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
@@ -607,3 +649,57 @@ class OrderApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.product.refresh_from_db()
         self.assertEqual(self.product.stock, 3)
+
+
+class PaymentReservationServiceTests(TestCase):
+    def test_expiring_reservations_restores_stock_without_cancelling_active_orders(self):
+        user = get_user_model().objects.create_user(
+            username="ana", email="ana@example.com", password="secure-password"
+        )
+        category = Category.objects.create(name="Electronics")
+        product = Product.objects.create(
+            name="Headphones",
+            description="Wireless headphones",
+            price="100.00",
+            stock=3,
+            category=category,
+        )
+        expired_order = Order.objects.create(
+            user=user,
+            total="200.00",
+            payment_method=Order.PaymentMethod.CARD,
+            payment_expires_at=timezone.now() - timedelta(minutes=1),
+        )
+        active_order = Order.objects.create(
+            user=user,
+            total="100.00",
+            payment_method=Order.PaymentMethod.CARD,
+            payment_expires_at=timezone.now() + timedelta(minutes=1),
+        )
+        OrderItem.objects.create(
+            order=expired_order,
+            product=product,
+            product_name=product.name,
+            unit_price="100.00",
+            quantity=2,
+            line_total="200.00",
+        )
+        OrderItem.objects.create(
+            order=active_order,
+            product=product,
+            product_name=product.name,
+            unit_price="100.00",
+            quantity=1,
+            line_total="100.00",
+        )
+
+        with transaction.atomic():
+            expired_count = expire_payment_reservations()
+
+        expired_order.refresh_from_db()
+        active_order.refresh_from_db()
+        product.refresh_from_db()
+        self.assertEqual(expired_count, 1)
+        self.assertEqual(expired_order.status, Order.Status.CANCELLED)
+        self.assertEqual(active_order.status, Order.Status.PENDING)
+        self.assertEqual(product.stock, 5)

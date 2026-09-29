@@ -105,6 +105,28 @@ class ProductApiTests(APITestCase):
         response = self.client.post("/api/products/", payload)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
+    def test_authenticated_customer_cannot_create_products(self):
+        customer = get_user_model().objects.create_user(
+            username="customer",
+            email="customer@example.com",
+            password="secure-password",
+        )
+        self.client.force_authenticate(customer)
+
+        response = self.client.post(
+            "/api/products/",
+            {
+                "name": "Unauthorized product",
+                "description": "Must not be created",
+                "price": "50.00",
+                "stock": 2,
+                "category": self.active_category.id,
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertFalse(Product.objects.filter(name="Unauthorized product").exists())
+
     def test_product_creation_rejects_negative_prices(self):
         self.client.force_authenticate(self.staff)
         payload = {
