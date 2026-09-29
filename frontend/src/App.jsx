@@ -82,6 +82,7 @@ function App() {
   const [paymentOrder, setPaymentOrder] = useState(null)
   const [paymentOrderError, setPaymentOrderError] = useState('')
   const [ordersError, setOrdersError] = useState('')
+  const [imagePreview, setImagePreview] = useState(null)
   const [message, setMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
 
@@ -432,9 +433,23 @@ function App() {
         </section>
       )}
 
-      {message && <p className="notice" role="status">{message}</p>}
+        {message && <p className="notice" role="status">{message}</p>}
 
-      <div className="content">
+        {imagePreview && (
+          <div className="image-preview-backdrop" role="presentation" onClick={() => setImagePreview(null)}>
+            <section className="image-preview" role="dialog" aria-modal="true" aria-labelledby="image-preview-title" onClick={(event) => event.stopPropagation()}>
+              <button className="close-button" type="button" onClick={() => setImagePreview(null)} aria-label="Cerrar vista ampliada">×</button>
+              <img src={imagePreview.image} alt={imagePreview.name} />
+              <div>
+                <p className="eyebrow">VISTA AMPLIADA</p>
+                <h2 id="image-preview-title">{imagePreview.name}</h2>
+                <strong>{formatPrice(imagePreview.price)}</strong>
+              </div>
+            </section>
+          </div>
+        )}
+
+        <div className="content">
         <section className="catalog" aria-labelledby="catalog-title">
           <div className="section-heading">
             <p className="eyebrow">CATÁLOGO</p>
@@ -455,9 +470,12 @@ function App() {
           <div className="product-grid">
             {visibleProducts.map((product) => (
               <article className="product-card" key={product.id}>
-                <div className="product-image">
-                  {product.image ? <img src={product.image} alt={product.name} /> : product.name.slice(0, 1)}
-                </div>
+                {product.image ? (
+                  <button className="product-image" type="button" onClick={() => setImagePreview(product)} aria-label={`Ver imagen ampliada de ${product.name}`}>
+                    <img src={product.image} alt={product.name} />
+                    <span>Ver ampliada</span>
+                  </button>
+                ) : <div className="product-image">{product.name.slice(0, 1)}</div>}
                 <h3>{product.name}</h3>
                 <p>{product.description || 'Producto seleccionado para tu compra.'}</p>
                 <div className="product-footer">
@@ -485,11 +503,14 @@ function App() {
                 {orders.map((order) => (
                   <article className="customer-order" key={order.id}>
                     <div className="order-summary">
-                      <div>
+                      <div className="order-identification">
                         <span className="order-number">Pedido #{order.id}</span>
                         <span className="order-date">{formatDate(order.created_at)}</span>
                       </div>
-                      <strong>{formatPrice(order.total)}</strong>
+                      <div className="order-total">
+                        <span>Total</span>
+                        <strong>{formatPrice(order.total)}</strong>
+                      </div>
                     </div>
                     <div className="order-statuses">
                       <span className={`status status-${order.payment_status}`}>Pago: {paymentStatusLabels[order.payment_status] || order.payment_status}</span>
@@ -497,7 +518,7 @@ function App() {
                     </div>
                     <ul className="order-items">
                       {order.items.map((item) => (
-                        <li key={item.id}>{item.quantity} x {item.product_name}</li>
+                        <li key={item.id}><span>{item.quantity}x</span>{item.product_name}</li>
                       ))}
                     </ul>
                     {order.payment_status === 'failed' && <button className="button small retry-payment" type="button" onClick={() => retryPayment(order.id)} disabled={isLoading}>Reintentar pago</button>}
