@@ -11,9 +11,12 @@ from django.shortcuts import get_object_or_404
 from django.utils.crypto import constant_time_compare
 from django.utils import timezone
 from rest_framework import status
+from rest_framework import serializers
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema, extend_schema_view, inline_serializer
 
 from cart.models import Cart, CartItem
 from orders.api.serializers import (
@@ -30,6 +33,16 @@ from orders.notifications import (
 )
 from orders.services import PAYMENT_RESERVATION_MINUTES, expire_payment_reservations
 from products.models import Product
+
+PaymentPreferenceSerializer = inline_serializer(
+    name="PaymentPreference",
+    fields={
+        "preference_id": serializers.CharField(),
+        "checkout_url": serializers.URLField(),
+        "init_point": serializers.URLField(required=False, allow_null=True),
+        "sandbox_init_point": serializers.URLField(required=False, allow_null=True),
+    },
+)
 
 
 def is_valid_mercadopago_signature(request, data_id):
@@ -58,6 +71,10 @@ def is_valid_mercadopago_signature(request, data_id):
     return constant_time_compare(expected_hash, received_hash)
 
 
+@extend_schema_view(
+    get=extend_schema(operation_id="orders_list", responses=OrderSerializer(many=True)),
+    post=extend_schema(operation_id="orders_create", request=CheckoutSerializer, responses={201: OrderSerializer}),
+)
 class OrderListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -151,6 +168,7 @@ class OrderListCreateView(APIView):
         return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)
 
 
+@extend_schema_view(get=extend_schema(operation_id="orders_retrieve", responses=OrderSerializer))
 class OrderDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -161,6 +179,13 @@ class OrderDetailView(APIView):
         return Response(OrderSerializer(order).data)
 
 
+@extend_schema_view(
+    post=extend_schema(
+        operation_id="orders_create_payment_preference",
+        request=None,
+        responses={201: PaymentPreferenceSerializer},
+    ),
+)
 class PaymentPreferenceView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -280,6 +305,9 @@ class PaymentPreferenceView(APIView):
             )
 
 
+@extend_schema_view(
+    post=extend_schema(operation_id="mercadopago_payment_webhook", request=OpenApiTypes.OBJECT, responses={204: None}, auth=[]),
+)
 class MercadoPagoWebhookView(APIView):
     authentication_classes = []
     permission_classes = []
@@ -354,6 +382,9 @@ class MercadoPagoWebhookView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+@extend_schema_view(
+    patch=extend_schema(operation_id="orders_update_status", request=OrderStatusSerializer, responses=OrderSerializer),
+)
 class OrderStatusUpdateView(APIView):
     permission_classes = [IsAdminUser]
 
@@ -415,6 +446,9 @@ class OrderStatusUpdateView(APIView):
         return Response(OrderSerializer(order).data)
 
 
+@extend_schema_view(
+    patch=extend_schema(operation_id="orders_update_payment_status", request=PaymentStatusSerializer, responses=OrderSerializer),
+)
 class PaymentStatusUpdateView(APIView):
     permission_classes = [IsAdminUser]
 

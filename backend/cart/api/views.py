@@ -5,6 +5,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from drf_spectacular.utils import extend_schema, extend_schema_view
 
 from cart.api.serializers import (
     CartItemInputSerializer,
@@ -24,6 +25,9 @@ def get_cart(user):
         return cart
 
 
+@extend_schema_view(
+    get=extend_schema(operation_id="cart_retrieve", responses=CartSerializer),
+)
 class CartView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -31,6 +35,13 @@ class CartView(APIView):
         return Response(CartSerializer(get_cart(request.user)).data)
 
 
+@extend_schema_view(
+    post=extend_schema(
+        operation_id="cart_items_create",
+        request=CartItemInputSerializer,
+        responses=CartItemSerializer,
+    ),
+)
 class CartItemCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -73,6 +84,14 @@ class CartItemCreateView(APIView):
         return Response(CartItemSerializer(item).data, status=response_status)
 
 
+@extend_schema_view(
+    patch=extend_schema(
+        operation_id="cart_items_partial_update",
+        request=CartItemQuantitySerializer,
+        responses=CartItemSerializer,
+    ),
+    delete=extend_schema(operation_id="cart_items_destroy", responses={204: None}),
+)
 class CartItemDetailView(APIView):
     permission_classes = [IsAuthenticated]
 

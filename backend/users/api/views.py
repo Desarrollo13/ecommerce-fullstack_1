@@ -3,6 +3,7 @@ from rest_framework import generics, status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from drf_spectacular.utils import extend_schema
 
 from users.api.serializers import RegisterSerializer
 from users.notifications import send_welcome_email
@@ -51,6 +52,7 @@ class SessionRefreshView(TokenRefreshView):
 class SessionLogoutView(generics.GenericAPIView):
     permission_classes = [AllowAny]
 
+    @extend_schema(operation_id="auth_logout", request=None, responses={204: None})
     def post(self, request):
         response = Response(status=status.HTTP_204_NO_CONTENT)
         response.delete_cookie("ecommerce-refresh-token", path="/api/auth/")

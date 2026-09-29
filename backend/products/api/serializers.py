@@ -6,7 +6,7 @@ from products.models import Category, Product
 class PublicProductSerializer(serializers.ModelSerializer):
     is_available = serializers.SerializerMethodField()
 
-    def get_is_available(self, product):
+    def get_is_available(self, product: Product) -> bool:
         return product.stock > 0
 
     class Meta:
